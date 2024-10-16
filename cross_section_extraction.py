@@ -18,11 +18,11 @@ from OSM_data_river_retrieval import fetch_river_overpass
 
 
 
-def cross_section_extraction(river, interval, width):
+def cross_section_extraction(river, interval, width,output_gdf,  output_file_1, output_file_2):
     """
     Get cross-sections
     :param river: River geodataframe
-    :return: crosssections: as geodataframe to put into profile_extraction
+    :return: gdf_1 and gdf_2 geodataframes of cross_sections on each side
     """
 
     # if river[river.geometry.geom_type != 'lines']:
@@ -32,24 +32,45 @@ def cross_section_extraction(river, interval, width):
     projected_gdf = river.to_crs(epsg=28992)
     # riverline = projected_gdf.geometry.iloc[0] # This takes the LineString from the geopanda geodataframe
     # print("riverline legth: ", riverline.length)
-
     cross_sections = []
+    cross_sections_1 = []
+    cross_sections_2 = []
+    index_list = []
     for index, row in projected_gdf.iterrows():
         riverline = row['geometry']
+
         print("index, riverline legth: ", index, riverline.length)
+
         for distance_along_line in np.arange(0, riverline.length, interval):
             cross_section = get_perpendicular_cross_section(riverline, distance_along_line, width)
             cross_sections.append(cross_section)
+            # print('type ', type(cross_section)) #linestring
+            # Split in two
+            p1 = cross_section.coords[0]
+            # print('point and type ', p1, type(p1)) #point is a tuple
+            p2 = cross_section.coords[-1]
+            midpoint = Point((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
+            line1 = LineString([midpoint, p1])  # From the first point to the midpoint
+            line2 = LineString([midpoint, p2])  # From the midpoint to the second point
+            cross_sections_1.append(line1)
+            cross_sections_2.append(line2)
+            index_list.append(index)
 
     gdf = gpd.GeoDataFrame(geometry=cross_sections)
-
-    # Set the correct Coordinate Reference System (CRS) - replace with your appropriate EPSG code
     gdf.set_crs(epsg=28992, inplace=True)
+    gdf_1 = gpd.GeoDataFrame(geometry=cross_sections_1)
+    # Set the correct Coordinate Reference System (CRS) - replace with your appropriate EPSG code
+    gdf_1.set_crs(epsg=28992, inplace=True)
+    gdf_2 = gpd.GeoDataFrame(geometry=cross_sections_2)
+    # Set the correct Coordinate Reference System (CRS) - replace with your appropriate EPSG code
+    gdf_2.set_crs(epsg=28992, inplace=True)
+
 
     # Save to a Shapefile (.shp)
-    # output_path = 'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/TEST_cross_sections/cross_sections_246.shp'
-    # gdf.to_file(output_path, driver='ESRI Shapefile')
-    return gdf
+    gdf.to_file(output_gdf, driver='ESRI Shapefile')
+    gdf_1.to_file(output_file_1, driver='ESRI Shapefile')
+    gdf_2.to_file(output_file_2, driver='ESRI Shapefile')
+    return gdf, gdf_1, gdf_2, cross_sections_1, cross_sections_2, index_list
 
 
 def get_perpendicular_cross_section(line, distance_along_line, width):
@@ -85,3 +106,7 @@ def get_perpendicular_cross_section(line, distance_along_line, width):
     return LineString([p1, p2])
 
 
+# Collecting a lot of cross-sections for river space delineation
+output_file_river = "river_shapefiles/longest_river.shp"
+gdf_river = gpd.read_file(output_file_river)
+cross_section_extraction(gdf_river, 0.5, 250, 'cross_sections/cs_interval0_5', 'cross_sections/cs_1_interval0_5', 'cross_sections/cs_2_interval0_5')

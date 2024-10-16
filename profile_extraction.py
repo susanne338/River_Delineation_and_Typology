@@ -22,13 +22,13 @@ cross_sections = gpd.read_file(
 n_points = 50
 
 
-def profile_extraction(cross_sections, n_points, wcs_url):
+def profile_extraction(cross_sections, n_points, wcs_url, output_folder_left, output_folder_right, ahn_tif, ahn_tif_mod):
     """
 
     :param cross_sections: geodataframe of all cross sections along river
     :param n_points: Amount of points we want on the cross section
     :param wcs_url: WMS link
-    :return:
+    :return: lists of geodataframes: combined_gdf, combined_gdf_left, combined_gdf_right
     """
     elevation_profiles = []
     gdf_list = []
@@ -67,27 +67,8 @@ def profile_extraction(cross_sections, n_points, wcs_url):
         lon.append(end_coords[0])
         lat.append(end_coords[1])
 
-        # create a geodataframe
-        # df = pd.DataFrame({'Latitude': lat,
-        #                    'Longitude': lon})
-        #
-        # gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.Longitude, df.Latitude))
-        # gdf.set_crs(epsg=28992, inplace=True)  # Updated CRS initialization method
-        #
-        # gdf_pcs = gdf.to_crs(epsg=28992) #unesearry?
 
-        # Adding h_distance column (?)
-        # initiate at 0
-        # gdf_pcs['h_distance'] = 0.0  # float instead of integer 0
-        # # Add distance
-        # for index, row in gdf_pcs.iterrows():
-        #     gdf_pcs.loc[index, 'h_distance'] = gdf_pcs.geometry[0].distance(gdf_pcs.geometry[index])
-        #
-        # # Extracting the elevations from the DEM
-        # gdf_pcs['Elevation'] = 0.0
-
-        dem, bbox_dem = fetch_AHN_data_bbox(wcs_url, bbox, 'temp_ahn.tif', 'temp_ahn_mod.tif',) #temp files cause this is in a loop and they keep being overwritten
-        # print('dem ', dem)
+        dem, bbox_dem = fetch_AHN_data_bbox(wcs_url, bbox, ahn_tif + str(ind) + '.tif', ahn_tif_mod + str(ind) + '.tif') #temp files cause this is in a loop and they keep being overwritten
         points = list(zip(lon, lat))
         # print('Points ', points)
         elevation_profile = extract_elevation(dem, points, bbox_dem)
@@ -107,6 +88,7 @@ def profile_extraction(cross_sections, n_points, wcs_url):
         # print(gdf)
 
         # Split in half, REMOVES NODATA POINTS -246
+        # maybe save each elevation profile seperatly
         midpoint = len(gdf) // 2
         left_section = gdf.iloc[midpoint:].copy()
         left_section = left_section[left_section['elevation'] != -246]
@@ -121,15 +103,15 @@ def profile_extraction(cross_sections, n_points, wcs_url):
         # gdf.to_file(
         #     r'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/TEST_cross_sections/extracted_sections_BIGTEST_shp/')
 
-        # # Save left section as a shapefile
-        # left_section_shapefile = left_section[['h_distance', 'elevation', 'geometry']]
-        # # left_section_shapefile.to_file(
-        # #     r'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/TEST_cross_sections/extracted_sections_shp/' + XS_ID + '_left.shp')
-        #
-        # # Save right section as a shapefile
-        # right_section_shapefile = right_section[['h_distance', 'elevation', 'geometry']]
-        # # right_section_shapefile.to_file(
-        # #     r'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/TEST_cross_sections/extracted_sections_shp/' + XS_ID + '_right.shp')
+        # Save left section as a shapefile
+        left_section_shapefile = left_section[['h_distance', 'elevation', 'geometry']]
+        left_section_shapefile.to_csv(
+            output_folder_left + '/'+ str(ind) + '_left.csv', index=False)
+
+        # Save right section as a shapefile
+        right_section_shapefile = right_section[['h_distance', 'elevation', 'geometry']]
+        right_section_shapefile.to_csv(
+            output_folder_right +'/' + str(ind) + '_right.csv', index=False)
 
     # After the loop, concatenate all the GeoDataFrames
     combined_gdf = pd.concat(gdf_list, ignore_index=True)
@@ -140,49 +122,5 @@ def profile_extraction(cross_sections, n_points, wcs_url):
     # combined_gdf.to_file(r'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/TEST_cross_sections/extracted_sections_BIGTESTTEST_shp/')
     return combined_gdf, combined_gdf_left, combined_gdf_right
 
-    # dem = rasterio.open(
-    #     r'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/water_middy/DTM_AHN_nodata_246_Middy.tif',
-    #     mode='r')
 
-    # for index, row in gdf_pcs.iterrows():
-    #     row, col = dem.index(row['Longitude'], row['Latitude'])
-    #     dem_data = dem.read(1)
-    #
-    #     # gdf_pcs['Elevation'].loc[index] = dem_data[row, col]
-    #     gdf_pcs.loc[index, 'Elevation'] = dem_data[row, col]
-    #
-    # # Split in half, REMOVES NODATA POINTS -246
-    # midpoint = len(gdf_pcs) // 2
-    # left_section = gdf_pcs.iloc[midpoint:].copy()
-    # left_section = left_section[left_section['Elevation'] != -246]
-    # left_section.reset_index(drop=True,
-    #                          inplace=True)  # Reset index for saving purposes. Ensures the indices start from 0 for both the left and right sections
-    #
-    # right_section = gdf_pcs.iloc[:midpoint + 1].copy()
-    # right_section = right_section[right_section['Elevation'] != -246]
-    # right_section.reset_index(drop=True, inplace=True)
-    #
-    # # Save left section
-    # left_x_y_data = left_section[['h_distance', 'Elevation', 'Latitude', 'Longitude']]
-    # left_x_y_data.to_csv(
-    #     r'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/TEST_cross_sections/extracted_sections/' + XS_ID + '_left.csv',
-    #     index=False)
-    #
-    # # Save right section
-    # right_x_y_data = right_section[['h_distance', 'Elevation', 'Latitude', 'Longitude']]
-    # right_x_y_data.to_csv(
-    #     r'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/TEST_cross_sections/extracted_sections/' + XS_ID + '_right.csv',
-    #     index=False)
-    #
-    # # Save left section as a shapefile
-    # left_section_shapefile = left_section[['h_distance', 'Elevation', 'Latitude', 'Longitude', 'geometry']]
-    # left_section_shapefile.to_file(
-    #     r'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/TEST_cross_sections/extracted_sections_shp/' + XS_ID + '_left.shp')
-    #
-    # # Save right section as a shapefile
-    # right_section_shapefile = right_section[['h_distance', 'Elevation', 'Latitude', 'Longitude', 'geometry']]
-    # right_section_shapefile.to_file(
-    #     r'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/TEST_cross_sections/extracted_sections_shp/' + XS_ID + '_right.shp')
-
-
-profile_extraction(cross_sections, n_points, wcs_url)
+# profile_extraction(cross_sections, n_points, wcs_url)

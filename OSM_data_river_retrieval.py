@@ -21,7 +21,7 @@ def fetch_river_overpass(river_name, output_file):
     :return: geodataframe of river eihter as geometry=lines or geometry = polygons AND saves as shapefile
     """
     api = overpy.Overpass()
-
+    # These are all possibilities but I would get multiple rivers if I didn't specify that it was a canal. I need to alter the function so that I can specify more? or even just take some id instead of river name
     # Overpass query
     # query = f"""
     # [out:json];

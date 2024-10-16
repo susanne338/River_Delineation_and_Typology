@@ -1,5 +1,5 @@
 """
-Retrieves WCS AHN data in a defined bounding box.
+Retrieves WCS AHN data in a defined bounding box by connecting to the wcs server
 input: bbox
 output: tif file
 TO DO:
@@ -12,9 +12,15 @@ from owslib.wcs import WebCoverageService
 import rasterio
 from rasterio.io import MemoryFile
 import numpy as np
-
-
-
+import json
+import requests
+from shapely.geometry import Polygon, box
+import os
+import geopandas as gpd
+import glob
+from rasterio.merge import merge
+# Set PROJ_LIB to the correct PROJ path used by GDAL/rasterio
+os.environ['PROJ_LIB'] = r"C:\Program Files\QGIS 3.28.6\share\proj"
 def fetch_AHN_data_bbox(wcs_url, bbox, TIFfilename, TIFfilename_modified):
     """
 
@@ -210,3 +216,92 @@ def extract_elevation(elevation_data, points, bbox):
 #     with open(f'{tile_name}.tif', 'wb') as f:
 #         f.write(response.content)
 #     print(f'Downloaded: {tile_name}')
+
+
+#DOWLOAD AHN TILES------------------------------------------------------------------------------------------------------
+
+def load_json(json_path):
+    with open(json_path, 'r') as file:
+        data = json.load(file)
+    return data
+
+def tile_intersects(tile_coords, bbox):
+    tile_polygon = Polygon(tile_coords)
+    bbox_polygon = box(*bbox)  # Create a Polygon for the bounding box
+    return tile_polygon.intersects(bbox_polygon)
+
+def download_AHN_tile(url, destination_folder, filename):
+    response = requests.get(url, stream=True)
+    if response.status_code == 200:
+        file_path = os.path.join(destination_folder, filename)
+        with open(file_path, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=1024):
+                file.write(chunk)
+        print(f"Downloaded: {filename}")
+    else:
+        print(f"Failed to download: {filename} (Status code: {response.status_code})")
+
+
+def download_dsm_tiles(json_path, bbox, destination_folder):
+    # Load the JSON data
+    data = load_json(json_path)
+
+    # Ensure destination folder exists
+    if not os.path.exists(destination_folder):
+        os.makedirs(destination_folder)
+
+    # Iterate through the features (tiles) in the JSON
+    for feature in data['features']:
+        tile_coords = feature['geometry']['coordinates'][0]  # Polygon coordinates
+        tile_url = feature['properties']['url']  # DSM tile URL
+        tile_name = feature['properties']['name']  # Filename
+
+        # Check if the tile intersects with the bounding box
+        if tile_intersects(tile_coords, bbox):
+            print(f"Tile {tile_name} intersects with the bounding box. Downloading...")
+            # Download the tile
+            download_AHN_tile(tile_url, destination_folder, tile_name)
+        else:
+            print(f"Tile {tile_name} does not intersect with the bounding box.")
+
+
+# json_path = 'needed_files/kaartbladindex_AHN_DSM.json'
+# gdf = gpd.read_file('cross_sections/cross_sections_longest.shp')
+# bbox = gdf.total_bounds
+destination_folder = 'AHN_tiles'
+# download_dsm_tiles(json_path, bbox, destination_folder)
+
+
+
+# MERGE tif files DOESNT WORK------------------------------------------------------------------------------------------
+def merge_tiles(combined_tiles, folder_of_tiles, nodata_value = -246):
+
+    combined_tif = combined_tiles
+    tif_files = glob.glob(os.path.join(folder_of_tiles, '*.tif'))
+
+    src_files_to_mosaic = []
+    for tif_file in tif_files:
+        src = rasterio.open(tif_file)
+        src_files_to_mosaic.append(src)
+
+    mosaic, out_transform = merge(src_files_to_mosaic)
+
+    out_meta = src_files_to_mosaic[0].meta.copy()
+
+    out_meta.update({
+        "driver": "GTiff",
+        "height": mosaic.shape[1],
+        "width": mosaic.shape[2],
+        "transform": out_transform,
+        "nodata": nodata_value,
+        "dtype": "float32"
+    })
+
+    with rasterio.open(combined_tif, "w", **out_meta) as dest:
+        dest.write(mosaic)
+    for src in src_files_to_mosaic:
+        print(f"File: {src.name}, Nodata Value: {src.nodata}")
+        src.close()
+    print(f"Merged TIF saved to {combined_tif}")
+
+
