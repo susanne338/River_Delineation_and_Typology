@@ -1,7 +1,6 @@
 import geopandas as gpd
 import fiona
 import pandas as pd
-import pygeos
 import shapely
 from shapely.wkt import loads
 from shapely.geometry import box
@@ -10,7 +9,7 @@ import os
 from tqdm import tqdm
 
 # file = "landuse.gml"
-file = "landuse.gpkg"
+file = "needed_files/landuse.gpkg"
 file_profile = "profiles/left/2_left.csv"
 cross_section_points = "points_line.shp"
 cross_section_all = "cross_sections/cross_sections_1_longest.shp"
@@ -33,10 +32,10 @@ def landuse_cross_section(gpkg_file, cross_sections_shp):
     """
     # Load the points data and get coordinates
     pointss_gdf = gpd.read_file(cross_sections_shp)
-    print("poitns gdf columns ", pointss_gdf.columns)
+    # print("poitns gdf columns ", pointss_gdf.columns)
     points_gdf = pointss_gdf.iloc[[7]]
-    print("points gdf ", points_gdf)
-    print("points gdf columns ", points_gdf.columns)
+    # print("points gdf ", points_gdf)
+    # print("points gdf columns ", points_gdf.columns)
     points_gdf_geom = points_gdf.geometry.iloc[0]
     start_coords, end_coords = list(points_gdf_geom.coords)[0], list(points_gdf_geom.coords)[1]
 
@@ -129,7 +128,7 @@ def landuse_profile(gpkg_landuse, profile_csv):
 
 # landuse_profile(file, file_profile)
 
-csv_file = "landuse_profile/landuseTEST.csv"
+# csv_file = "landuse_profile/landuseTEST.csv"
 
 
 def plot_landuse(csv_file):
@@ -172,6 +171,7 @@ def landuse_profiles(gpkg_landuse, profile_csv_folder, total_cross_section_shp, 
     total_cs = gpd.read_file(total_cross_section_shp)
     landuse_gdf = gpd.read_file(gpkg_landuse)
 
+    # Change CRS if needed
     if total_cs.crs != landuse_gdf.crs:
         total_cs = total_cs.to_crs(landuse_gdf.crs)
         print("Transformed total_cs to match the CRS of landuse_gdf.")
@@ -181,15 +181,18 @@ def landuse_profiles(gpkg_landuse, profile_csv_folder, total_cross_section_shp, 
     #        'beginLifespanVersion', 'hilucsPresence', 'specificPresence',
     #        'observationDate', 'validFrom', 'validTo', 'geometry'],
     #       dtype='object')
+
+    # Total bounds of river (can also be done using river buffer?)
     bbox = total_cs.total_bounds
-    print("bbox ", bbox)
+    # print("bbox ", bbox)
+    # This selects the bbox of the landuse of the river
     landuse_filtered = landuse_gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
 
     # Get and put data in gpd and then process
     for filename in os.listdir(profile_csv_folder):
         if filename.endswith('.csv'):
             file_path = os.path.join(profile_csv_folder, filename)
-            print("file path ", file_path)
+            # print("file path ", file_path)
             df = pd.read_csv(file_path)
 
             # Convert the  'geometry' column from WKT strings to Shapely geometries
@@ -197,26 +200,28 @@ def landuse_profiles(gpkg_landuse, profile_csv_folder, total_cross_section_shp, 
             geo_df = gpd.GeoDataFrame(df, geometry='geometry')
             geo_df.set_crs(epsg=28992, inplace=True)
 
+            # Change CRS if needed
             if geo_df.crs != landuse_gdf.crs:
                 geo_df = geo_df.to_crs(landuse_gdf.crs)
-
+            # sjoin my gdf of csv file and subset of landuse
             joined_gdf = gpd.sjoin(geo_df, landuse_filtered, how="left", predicate="intersects")
 
             # Extract land use column and add it to the points GeoDataFrame. I use 'description' now but am not sure if it is the best column
             geo_df['landuse'] = joined_gdf['description']
 
             # Print the result
-            print(geo_df[['h_distance', 'elevation', 'geometry', 'landuse']].head())
+            # print(geo_df[['h_distance', 'elevation', 'geometry', 'landuse']].head())
             # output_place = output_folder + '/' + filename
+
             output_place = os.path.join(output_folder, filename)
             geo_df.to_csv(output_place, index=False)
     return
 
 
-# landuse_profiles(file, 'profiles/right', cross_Section_longest, 'landuse_profile/right')
+landuse_profiles(file, 'profiles/right', cross_Section_longest, 'landuse_profile/right')
 
 
-# GET ALL LANDUSES IN RIVER CROSS-SECTIONS-----------------------------------------------------------------------------
+# GET ALL LANDUSES IN RIVER CROSS-SECTIONS--like list of all possibilities---------------------------------------------------------------------------
 def extract_landuses(unique_landuses, folder, output_csv_file):
     for filename in os.listdir(folder):
         if filename.endswith('.csv'):  # Ensure we're only processing CSV files
@@ -243,7 +248,7 @@ output_csv_file = 'landuse_profile/unique_landuses.csv'
 extract_landuses(unique_landuses, 'landuse_profile/left', output_csv_file)
 extract_landuses(unique_landuses, 'landuse_profile/right', output_csv_file)
 unique_landuses_list = list(unique_landuses)
-print(f"Unique land uses found: {unique_landuses_list}")
+# print(f"Unique land uses found: {unique_landuses_list}")
 
 #
 # # Convert the list to a DataFrame with one column named 'landuse'

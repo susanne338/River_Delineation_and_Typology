@@ -5,28 +5,22 @@ output: geopackage file of tiles intersecting with bbox for all available layers
 """
 
 import requests
-import geopandas as gpd
 from shapely.geometry import box
 import geopandas as gpd
 import pandas as pd
 import fiona
-from OSM_data_river_retrieval import fetch_river_overpass
-import matplotlib.pyplot as plt
 import os
-import subprocess
 import gzip
 import shutil
 from tqdm import tqdm
-from AHN_data_retrieval import fetch_AHN_data_bbox
 
 # river = 'Kanaal door Walcheren'
 # river_gdf = fetch_river_overpass(river, 'candelete.shp')
 # buffer = 100
 # WFS URL for 3DBAG Note that only the 2D projection of the models is served via WMS/WFS.
 wfs_url = 'https://data.3dbag.nl/api/BAG3D/wfs?request=getcapabilities'
-tile_index_path = 'needed_files/tile_index.fgb'
+tile_index_path = '../needed_files/tile_index.fgb'
 tiles_folder = '3dbag_tiles_layers'
-
 
 
 def fetch_3DBAG_tiles(fgb_path, buffer, river_gdf, output_folder, target_crs='EPSG:28992'):
@@ -53,7 +47,7 @@ def fetch_3DBAG_tiles(fgb_path, buffer, river_gdf, output_folder, target_crs='EP
     iteration = 0
     for index, row in intersecting_tiles.iterrows():
         tile_id = row['tile_id']
-        gpkg_download = row['gpkg_download'] #this is the download link
+        gpkg_download = row['gpkg_download']  # this is the download link
         tile_id = tile_id.replace('/', '-')
         # print("tile id ", tile_id)
         print("gpkg download ", gpkg_download)
@@ -157,7 +151,6 @@ def fetch_3DBAG_tiles(fgb_path, buffer, river_gdf, output_folder, target_crs='EP
             print(f"Failed to download tile: {tile_id}, Status code: {response.status_code}")
 
 
-
 def combine_geotiles(input_folder, output_file):
     # Get all .gpkg files in the input folder
     gpkg_files = [f for f in os.listdir(input_folder) if f.endswith('.gpkg')]
@@ -208,18 +201,15 @@ def combine_geotiles(input_folder, output_file):
 
     print(f"All layers combined and saved to {output_file}")
 
-#
-# # Dowload all needed tiles
-# # PARAMETERS
-# buffer = 100  #Area around river so that there is some extra space for sure taken into account
-# tile_index_path = 'needed_files/tile_index.fgb'
-# tiles_folder = '3DBAG_tiles'
-#
-# river = 'Kanaal door Walcheren'
-# # gdf_river = fetch_river_overpass(river, 'KanaalDoorWalcheren.shp')
-# output_file = 'combined_3DBAG_tiles.gpkg'
-#
-# # EXECUTE SCRIPT TO GET ALL TILES
-# # fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
-# # output_file = 'combined_3dbag_l.gpkg'  # name of the output combined file
-# # combine_geotiles(tiles_folder, output_file)
+
+# DOWNLOAD ALL NEEDED FILES---------------------------------------------------------------------------------
+# PARAMETERS AND FILES
+buffer = 100  # Area around river so that there is some extra space for sure taken into account
+tile_index_path = 'needed_files/tile_index.fgb' #fgb file from 3DBAG with dimensions of tiles
+tiles_folder = '3DBAG_tiles' #output folder for my retrieved tiles
+gdf_river = gpd.read_file('river_shapefile/KanaalDoorWalcheren.shp') #shapefile of my river in NL
+output_file = '3DBAG_combined_tiles/combined_3DBAG_tiles.gpkg' #File to write all tiles combined to
+
+# EXECUTE SCRIPT TO GET ALL TILES
+# fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
+# combine_geotiles(tiles_folder, output_file)

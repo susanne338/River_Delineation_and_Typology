@@ -7,20 +7,13 @@ TO DO: boundary line doesn't work because cross-sections do not have correct ori
 
 """
 import geopandas as gpd
-import pickle
 from shapely.geometry import box
-from shapely import LineString, MultiPolygon, wkt
-from shapely.geometry import Polygon, Point, MultiLineString, MultiPoint
-from shapely.ops import transform, nearest_points
+from shapely import LineString, MultiPolygon
+from shapely.geometry import Polygon, Point, MultiLineString
+from shapely.ops import transform
 import fiona
 import os
-import sys
-import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from cross_section_extraction import cross_section_extraction
-from profile_extraction import profile_extraction
-from OSM_data_river_retrieval import fetch_river_overpass
 
 
 def drop_z(geom):
@@ -418,9 +411,9 @@ gdf_river = gpd.read_file(river)
 gdf_cs1 = gpd.read_file('cross_sections/cs_1_interval0_5/cs_1_interval0_5.shp')
 gdf_cs2 = gpd.read_file('cross_sections/cs_2_interval0_5/cs_2_interval0_5.shp')
 folder_3DBAG_transformed_tiles = "3DBAG_tiles"
-path_to_fgb_tile_index = 'needed_files/tile_index.fgb'
+path_to_fgb_tile_index = '../needed_files/tile_index.fgb'
 output_file_boundary_points= "boundary_points_buildings/cs_1_bp"
-buffer_output_file = "boundary_points_buildings/buffer.shp"
+buffer_output_file = "../boundary_points_buildings/buffer.shp"
 
 gdf, boundary_points = process_cross_sections(gdf_cs1, gdf_river, buffer_distance, buffer_output_file, path_to_fgb_tile_index, folder_3DBAG_transformed_tiles, output_file_boundary_points)
 

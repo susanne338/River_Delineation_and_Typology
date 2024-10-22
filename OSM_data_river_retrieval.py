@@ -8,7 +8,6 @@ Fix where it is saving to
 The function depends on defining rivrs which may not be complete
 """
 import osmnx as ox
-import geopandas as gpd
 import matplotlib.pyplot as plt
 import overpy
 import geopandas as gpd
@@ -79,4 +78,4 @@ def fetch_river_overpass(river_name, output_file):
 
 
 # Example usage
-# fetch_river_overpass("Kanaal door Walcheren", "KanaalDoorWalcheren.shp")
+# fetch_river_overpass("Kanaal door Walcheren", "river_shapefile/KanaalDoorWalcheren.shp")

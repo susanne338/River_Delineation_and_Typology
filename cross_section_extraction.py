@@ -1,33 +1,28 @@
 """
 This script computes the cross-sectional lines, begin point and end point, along a shapefile line, in this case a river.
-It actually doesn't really use the DTM data, i SHOULD REMOVE THIS FROM THE SCRIPT AND PUT IT IN FUNCTION SUCH THAT i CAN CALL IT IN FIRSTLINEOFBUILDINGS
+
 
 input: River line shapefile
-output: shapefile of all cross-sections
+output: shapefiles and gdfs of all cross-sections
 
-TO DO:
-remove DTM
-Maybe here cut off cross-sections
 """
 
 import geopandas as gpd
-import rasterio
 from shapely.geometry import LineString, Point
 import numpy as np
-from OSM_data_river_retrieval import fetch_river_overpass
 
 
-
-def cross_section_extraction(river, interval, width,output_gdf,  output_file_1, output_file_2):
+def cross_section_extraction(river, interval, width, output_gdf, output_file_1, output_file_2):
     """
     Get cross-sections
+    :param output_file_2:  output shapefile for cross-sections 2
+    :param output_file_1:  output shapefile for cross-sections 1
+    :param output_gdf: output shapefile for all cross-sections
+    :param width: width of total cross-section
+    :param interval: width between cross-sections
     :param river: River geodataframe
-    :return: gdf_1 and gdf_2 geodataframes of cross_sections on each side
+    :return: gdf, gdf_1, gdf_2, cross_sections_1, cross_sections_2, index_list
     """
-
-    # if river[river.geometry.geom_type != 'lines']:
-    #     print('river is not a line but probably polygon')
-    #     return
 
     projected_gdf = river.to_crs(epsg=28992)
     # riverline = projected_gdf.geometry.iloc[0] # This takes the LineString from the geopanda geodataframe
@@ -64,7 +59,6 @@ def cross_section_extraction(river, interval, width,output_gdf,  output_file_1, 
     gdf_2 = gpd.GeoDataFrame(geometry=cross_sections_2)
     # Set the correct Coordinate Reference System (CRS) - replace with your appropriate EPSG code
     gdf_2.set_crs(epsg=28992, inplace=True)
-
 
     # Save to a Shapefile (.shp)
     gdf.to_file(output_gdf, driver='ESRI Shapefile')
@@ -107,6 +101,7 @@ def get_perpendicular_cross_section(line, distance_along_line, width):
 
 
 # Collecting a lot of cross-sections for river space delineation
-output_file_river = "river_shapefiles/longest_river.shp"
+output_file_river = "../river_shapefiles/longest_river.shp"
 gdf_river = gpd.read_file(output_file_river)
-cross_section_extraction(gdf_river, 0.5, 250, 'cross_sections/cs_interval0_5', 'cross_sections/cs_1_interval0_5', 'cross_sections/cs_2_interval0_5')
+cross_section_extraction(gdf_river, 0.5, 250, 'cross_sections/cs_interval0_5', '../cross_sections/cs_1_interval0_5',
+                         'cross_sections/cs_2_interval0_5')

@@ -19,8 +19,20 @@ import os
 import geopandas as gpd
 import glob
 from rasterio.merge import merge
+import sys
+
 # Set PROJ_LIB to the correct PROJ path used by GDAL/rasterio
 os.environ['PROJ_LIB'] = r"C:\Program Files\QGIS 3.28.6\share\proj"
+
+os.environ['GISBASE'] = r"C:\Program Files\QGIS 3.28.6\bin\grass82.bat"  # Path to GRASS installation
+os.environ['PATH'] += os.pathsep + os.path.join(os.environ['GISBASE'], 'bin')
+os.environ['PATH'] += os.pathsep + os.path.join(os.environ['GISBASE'], '')
+os.environ['PATH'] += os.pathsep + os.path.join(os.environ['GISBASE'], 'lib')
+
+sys.path.append(os.path.join(os.environ['GISBASE'], 'etc', 'python'))
+
+
+# import grass.script as gscript
 def fetch_AHN_data_bbox(wcs_url, bbox, TIFfilename, TIFfilename_modified):
     """
 
@@ -46,8 +58,12 @@ def fetch_AHN_data_bbox(wcs_url, bbox, TIFfilename, TIFfilename_modified):
     # print(layer_info)
 
     # Set the timestamp (e.g., use the most recent date)
-    # If the service accepts today’s date in 'YYYY-MM-DD' format:
+    # Use this timestamp when using elipse drive DTM
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d')
+    # Use this timestamp when using elipse drive wcs for DSM 1.1.1
+    # timestamp = '2023-04-14'
+    print(f"Using timestamp: {timestamp}", 'and type ', type(timestamp))
+
 
     # Making the bbox slightly larger to avoid issues when extracting elevation for cross-section
     min_x, min_y, max_x, max_y = bbox
@@ -68,7 +84,7 @@ def fetch_AHN_data_bbox(wcs_url, bbox, TIFfilename, TIFfilename_modified):
     # Fetch correct resolution
     desired_resolution = 0.5  # meters/pixel
     width_pixels = max(1, int(bbox_width / desired_resolution))
-    height_pixels = max( 1, int(bbox_height / desired_resolution))
+    height_pixels = max(1, int(bbox_height / desired_resolution))
     # print(f"Bounding Box Width (in pixels): {width_pixels}")
     # print(f"Bounding Box Height (in pixels): {height_pixels}")
 
@@ -79,10 +95,11 @@ def fetch_AHN_data_bbox(wcs_url, bbox, TIFfilename, TIFfilename_modified):
         crs='EPSG:28992',
         srs='EPSG:28992',
         format='geotiff',
-        width=width_pixels,  # adjust depending on the size of the area
+        width=width_pixels,
         height=height_pixels,
         time=timestamp
     )
+    print('Response content: ', response)
     # Read the data into a NumPy array
     with MemoryFile(response.read()) as memfile:
         with memfile.open() as dataset:
@@ -128,7 +145,6 @@ def fetch_AHN_data_bbox(wcs_url, bbox, TIFfilename, TIFfilename_modified):
         data = np.where(no_data_mask, -246, data)
         # print('data ', data)
 
-
         # Update the metadata for the new output
         metadata = src.meta.copy()
         metadata.update({
@@ -140,9 +156,9 @@ def fetch_AHN_data_bbox(wcs_url, bbox, TIFfilename, TIFfilename_modified):
     with rasterio.open(TIFfilename_modified, 'w', **metadata) as dst:
         dst.write(data, 1)  # Write the modified data back to the first band
 
-
     # print("NoData values have been updated successfully!")
     return elevation_data, bbox_dem
+
 
 # fetch_AHN_data_bbox(wcs_url, bbox)
 
@@ -192,6 +208,7 @@ def extract_elevation(elevation_data, points, bbox):
 
     return elevations
 
+
 # TIF-------------------------------------------------------------------------------------------------------------------
 # import geopandas as gpd
 # import requests
@@ -218,17 +235,19 @@ def extract_elevation(elevation_data, points, bbox):
 #     print(f'Downloaded: {tile_name}')
 
 
-#DOWLOAD AHN TILES------------------------------------------------------------------------------------------------------
+# DOWNLOAD AHN TILES-------------------------------------------------------------------------------------------
 
 def load_json(json_path):
     with open(json_path, 'r') as file:
         data = json.load(file)
     return data
 
+
 def tile_intersects(tile_coords, bbox):
     tile_polygon = Polygon(tile_coords)
     bbox_polygon = box(*bbox)  # Create a Polygon for the bounding box
     return tile_polygon.intersects(bbox_polygon)
+
 
 def download_AHN_tile(url, destination_folder, filename):
     response = requests.get(url, stream=True)
@@ -268,40 +287,50 @@ def download_dsm_tiles(json_path, bbox, destination_folder):
 # json_path = 'needed_files/kaartbladindex_AHN_DSM.json'
 # gdf = gpd.read_file('cross_sections/cross_sections_longest.shp')
 # bbox = gdf.total_bounds
-destination_folder = 'AHN_tiles'
+destination_folder = 'AHN_tiles_DSM'
+
+
 # download_dsm_tiles(json_path, bbox, destination_folder)
 
 
-
 # MERGE tif files DOESNT WORK------------------------------------------------------------------------------------------
-def merge_tiles(combined_tiles, folder_of_tiles, nodata_value = -246):
+def merge_tiles(combined_tiles, folder_of_tiles):
+    """
+    :param combined_tiles: file output
+    :param folder_of_tiles: folder that contains the tiles to be merged
+    :param nodata_value:
+    :return:
+    """
 
-    combined_tif = combined_tiles
     tif_files = glob.glob(os.path.join(folder_of_tiles, '*.tif'))
+    print('tif files ', tif_files)
 
     src_files_to_mosaic = []
     for tif_file in tif_files:
         src = rasterio.open(tif_file)
         src_files_to_mosaic.append(src)
-
+    # Sources (list) is the sequence of dataset objects opened in r mode or path-like objects
     mosaic, out_transform = merge(src_files_to_mosaic)
 
     out_meta = src_files_to_mosaic[0].meta.copy()
+    print('meta ', out_meta)
 
     out_meta.update({
         "driver": "GTiff",
         "height": mosaic.shape[1],
         "width": mosaic.shape[2],
-        "transform": out_transform,
-        "nodata": nodata_value,
-        "dtype": "float32"
+        "transform": out_transform
+        # "nodata": nodata_value,
+        # "dtype": "float32"
     })
 
-    with rasterio.open(combined_tif, "w", **out_meta) as dest:
+    with rasterio.open(combined_tiles, "w", **out_meta) as dest:
         dest.write(mosaic)
     for src in src_files_to_mosaic:
         print(f"File: {src.name}, Nodata Value: {src.nodata}")
         src.close()
-    print(f"Merged TIF saved to {combined_tif}")
+    print(f"Merged TIF saved to {combined_tiles}")
 
-
+# output_merged = 'AHN_tiles_DSM/merged.tif'
+# folder = 'AHN_tiles_DSM'
+# merge_tiles(output_merged, folder)

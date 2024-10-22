@@ -12,11 +12,10 @@ import geopandas as gpd
 from shapely.geometry import Point
 import numpy as np
 import pandas as pd
-import rasterio
-import matplotlib.pyplot as plt
 from AHN_data_retrieval import fetch_AHN_data_bbox, extract_elevation
 
-wcs_url = 'https://api.ellipsis-drive.com/v3/ogc/wcs/8b60a159-42ed-480c-ba86-7f181dcf4b8a?request=getCapabilities&version=1.0.0&requestedEpsg=28992'
+wcs_url_dtm = 'https://api.ellipsis-drive.com/v3/ogc/wcs/8b60a159-42ed-480c-ba86-7f181dcf4b8a?request=getCapabilities&version=1.0.0&requestedEpsg=28992'
+wcs_url_dsm = 'https://api.ellipsis-drive.com/v3/ogc/wcs/78080fff-8bcb-4258-bb43-be9de956b3e0?request=getCapabilities&version=1.0.0&requestedEpsg=28992'
 cross_sections = gpd.read_file(
     r'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/TEST_cross_sections/cross_sections.shp')
 n_points = 50
@@ -35,6 +34,7 @@ def profile_extraction(cross_sections, n_points, wcs_url, output_folder_left, ou
     gdf_list_left = []
     gdf_list_right = []
     for ind, row in cross_sections.iterrows():
+        print('I am working on ', ind)
 
         # XS_ID = str(row['FID'])
         # print("id? ", XS_ID)
@@ -112,6 +112,7 @@ def profile_extraction(cross_sections, n_points, wcs_url, output_folder_left, ou
         right_section_shapefile = right_section[['h_distance', 'elevation', 'geometry']]
         right_section_shapefile.to_csv(
             output_folder_right +'/' + str(ind) + '_right.csv', index=False)
+        print('i saved the csv files of ', ind)
 
     # After the loop, concatenate all the GeoDataFrames
     combined_gdf = pd.concat(gdf_list, ignore_index=True)
@@ -122,5 +123,40 @@ def profile_extraction(cross_sections, n_points, wcs_url, output_folder_left, ou
     # combined_gdf.to_file(r'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/Python_test/TEST_cross_sections/extracted_sections_BIGTESTTEST_shp/')
     return combined_gdf, combined_gdf_left, combined_gdf_right
 
+cross_sections_longest = gpd.read_file('cross_sections/cross_sections_longest.shp')
+n_points = 50
 
-# profile_extraction(cross_sections, n_points, wcs_url)
+# wcs_url_dsm = 'https://api.ellipsis-drive.com/v3/ogc/wcs/8b60a159-42ed-480c-ba86-7f181dcf4b8a?request=getCapabilities&version=1.0.0&requestedEpsg=28992'
+folder_left = 'profiles/left_dsm'
+folder_right = 'profiles/right_dsm'
+print('Going to extract profiles!...')
+profile_extraction(cross_sections_longest, n_points, wcs_url_dsm, folder_left, folder_right, 'trash/tempDELETE', 'trash/tempDELETEmod')
+
+
+# unfinsihes?
+def profile_extraction_tiles(cs, n_points, tiles_folder, output_folder_left, output_folder_right):
+    elevation_profiles = []
+    gdf_list = []
+    gdf_list_left = []
+    gdf_list_right = []
+    for ind, row in cross_sections.iterrows():
+        print('I am working on ', ind)
+
+        start_coords = list([row.geometry][0].coords)[0]
+        end_coords = list([row.geometry][0].coords)[1]
+        # Create the points on the cross-sections
+        lon = [start_coords[0]]
+        lat = [start_coords[1]]
+
+        for i in np.arange(1, n_points + 1):
+            x_dist = end_coords[0] - start_coords[0]
+            y_dist = end_coords[1] - start_coords[1]
+            point = [(start_coords[0] + (x_dist / (n_points + 1)) * i),
+                     (start_coords[1] + (y_dist / (n_points + 1)) * i)]
+            lon.append(point[0])
+            lat.append(point[1])
+
+        lon.append(end_coords[0])
+        lat.append(end_coords[1])
+
+
