@@ -2,19 +2,20 @@
 Run this script in the python console in qgis. Can't run from here because 'processing' uses an old python? One of the wheels is in python2x and can't be installed.
 Change input paths as needed.
 Change output path as needed.
+TODO: right now, it takes a general observer height but may need to adapt to cross-section.
 """
 
 import processing
 
 # Load the point shapefile into QGIS (make sure the path is correct)
-points_layer = QgsVectorLayer('C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/pythonProject/river_shapefiles/river_midpoints_elev_2m.shp', 'points', 'ogr')
+points_layer = QgsVectorLayer('C:/Users/susan/Documents/thesis/Thesis-terminal/thesis_output/river_shapefiles/river_midpoints_elev_2m.shp', 'points', 'ogr')
 if not points_layer.isValid():
     print("Layer failed to load!")
 else:
     print(f"Loaded {points_layer.featureCount()} features.")
 
 # Path to the DEM raster for viewshed analysis
-dem_path = 'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/pythonProject/AHN_tiles_DSM/clipped_total.tif'
+dem_path = 'C:/Users/susan/Documents/thesis/Thesis-terminal/thesis_output/AHN_tiles_DSM/clipped_total.tif'
 
 
 # Loop through each point in the shapefile
@@ -31,7 +32,7 @@ for i, feature in enumerate(points_layer.getFeatures()):
             'max_distance': 100,  # Maximum visibility distance
             'observer_elevation': 2.00,  # Observer height (adjust as needed)
             'target_elevation': 0,  # Target height (adjust if needed)
-            'output': f'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/pythonProject/visibility/viewshed_{point_id}.tif',  # Output file path for each point
+            'output': f'C:/Users/susan/Documents/thesis/Thesis-terminal/thesis_output/visibility/viewshed_{point_id}.tif',  # Output file path for each point
             '-b': True
         }
 
@@ -41,7 +42,7 @@ for i, feature in enumerate(points_layer.getFeatures()):
         # Binary
         print(params.keys())
         viewshed_output_path = params['output']
-        binary_output_path = f'C:/Users/susan/OneDrive/Documenten/geomatics/Thesis_3D_Delineation/pythonProject/visibility/binary_viewshed_{point_id}.tif'
+        binary_output_path = f'C:/Users/susan/Documents/thesis/Thesis-terminal/thesis_output/visibility/binary_viewshed_{point_id}.tif'
 
         # Reclassify to create binary output
         reclass_params = {
