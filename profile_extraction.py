@@ -12,7 +12,9 @@ import geopandas as gpd
 from shapely.geometry import Point
 import numpy as np
 import pandas as pd
-from AHN_data_retrieval import fetch_AHN_data_bbox, extract_elevation
+import os
+import rasterio
+from AHN_data_retrievalDELETE import fetch_AHN_data_bbox, extract_elevation
 
 wcs_url_dtm = 'https://api.ellipsis-drive.com/v3/ogc/wcs/8b60a159-42ed-480c-ba86-7f181dcf4b8a?request=getCapabilities&version=1.0.0&requestedEpsg=28992'
 wcs_url_dsm = 'https://api.ellipsis-drive.com/v3/ogc/wcs/78080fff-8bcb-4258-bb43-be9de956b3e0?request=getCapabilities&version=1.0.0&requestedEpsg=28992'
@@ -134,14 +136,12 @@ profile_extraction(cross_sections_longest, n_points, wcs_url_dsm, folder_left, f
 
 
 # unfinsihes?
-def profile_extraction_tiles(cs, n_points, tiles_folder, output_folder_left, output_folder_right):
-    elevation_profiles = []
-    gdf_list = []
-    gdf_list_left = []
-    gdf_list_right = []
+def profile_extraction_tiles(cross_sections, n_points, tiles_folder, shapefile_path):
+
     for ind, row in cross_sections.iterrows():
         print('I am working on ', ind)
 
+        #  column 'geometry' holds POINT objects in shapefile
         start_coords = list([row.geometry][0].coords)[0]
         end_coords = list([row.geometry][0].coords)[1]
         # Create the points on the cross-sections
@@ -158,5 +158,41 @@ def profile_extraction_tiles(cs, n_points, tiles_folder, output_folder_left, out
 
         lon.append(end_coords[0])
         lat.append(end_coords[1])
+        points = list(zip(lon, lat))
 
+
+        elevations = []
+        for tif_file in os.listdir(tiles_folder):
+            if tif_file.endswith(".tif"):
+                tif_path = os.path.join(tiles_folder, tif_file)
+
+                with rasterio.open(tif_path) as src:
+                    # Get the bounds of the current .tif file
+                    bounds = src.bounds
+
+                    # Check for each point if it falls within the bounds of this .tif file
+                    for point in points:
+                        lon, lat = point
+                        if bounds.left <= lon <= bounds.right and bounds.bottom <= lat <= bounds.top:
+                            # If the point is within the bounds, get the elevation value
+                            row, col = src.index(lon, lat)
+                            elevation = src.read(1)[row, col]
+                            elevations.append({'geometry': Point(lon, lat), 'elevation': elevation})
+
+        # Create a geodataframe
+        gdf = gpd.GeoDataFrame(elevations)
+        gdf.set_crs(epsg=28992, inplace=True)
+
+        # Add a new column for horizontal distance, initialized to 0.0
+        gdf['h_distance'] = 0.0  # Initialize the h_distance column
+
+        # Calculate distances
+        for index, row in gdf.iterrows():
+            # Calculate the distance from the first point
+            if index == 0:
+                continue  # Skip the first point as distance to itself is 0
+            gdf.loc[index, 'h_distance'] = gdf.geometry[0].distance(gdf.geometry[index])
+
+        gdf.to_file(shapefile_path, driver='ESRI Shapefile')
+        print(f"Shapefile saved to: {shapefile_path}")
 

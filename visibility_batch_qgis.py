@@ -15,7 +15,7 @@ else:
     print(f"Loaded {points_layer.featureCount()} features.")
 
 # Path to the DEM raster for viewshed analysis
-dem_path = 'C:/Users/susan/Documents/thesis/Thesis-terminal/thesis_output/AHN_tiles_DSM/clipped_total.tif'
+dem_path = '/thesis_output/trash/clipped_total.tif'
 
 
 # Loop through each point in the shapefile

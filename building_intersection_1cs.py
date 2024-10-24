@@ -19,7 +19,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from cross_section_extraction import cross_section_extraction
 from profile_extraction import profile_extraction
-from OSM_data_river_retrieval import fetch_river_overpass
+from OSM_data_river_retrievalDELETE import fetch_river_overpass
 
 
 def tile_intersection(cross_section, fgb_path, folder_path):
