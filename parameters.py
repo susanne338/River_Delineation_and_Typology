@@ -219,53 +219,99 @@ def process_landuse(points_gdf, gpkg_folder):
     """
 
     # Initialize landuse column
+    points_gdf = points_gdf.copy(deep = True)
     points_gdf = points_gdf.to_crs(epsg=28992)
-    points_gdf['landuse'] = None
+    points_gdf['landuse'] = [[] for _ in range(len(points_gdf))]
+
+    # counter for points that get a landuse
+    points_with_landuse = set()
 
     bbox = points_gdf.total_bounds
-    print('I have found the bbox: ', bbox)
+    print('I have found the bbox of points: ', bbox)
+    print('total number of points: ', len(points_gdf))
 
-    # Loop through gpkg files
-    i = 0
-    for gpkg_file in os.listdir(gpkg_folder):
-        print('index ', i)
-        if not gpkg_file.endswith('.gml'):
+    # Loop through gmlfiles
+    for i, gml_file in enumerate(os.listdir(gpkg_folder)):
+        if not gml_file.endswith('.gml'):
             continue
-        gpkg_path = os.path.join(gpkg_folder, gpkg_file)
-        for layer_name in fiona.listlayers(gpkg_path):
-            print(f'Processing layer: {layer_name} in file: {gpkg_file}')
 
-            landuse_gdf = gpd.read_file(gpkg_path, layer=layer_name)
-            bounds_landuse = landuse_gdf.total_bounds
-            print('I have read the landuse file and its bounds are: ', bounds_landuse)
+        gml_path = os.path.join(gpkg_folder, gml_file)
+        print(f'\nProcessing file: {gml_file}')
+        original_crs = 'epsg:28992'
+        # with fiona.open(gml_path) as src:
+        #     print(f"Fiona driver: {src.driver}")
+        #     print(f"Fiona CRS: {src.crs}") # No crs for some reason
+        #     print(f"Fiona schema: {src.schema}")
+        #     print(f"Fiona bounds: {src.bounds}")
 
-            landuse_filtered = landuse_gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
-            print('I filtered the landuse to bbox')
+        for layer_name in fiona.listlayers(gml_path):
+            try:
+                print(f'Processing layer: {layer_name} in file: {gml_file}')
+                landuse_gdf = gpd.read_file(gml_path, layer=layer_name)
 
-            # Ensure CRS matches
-            if landuse_filtered.crs != points_gdf.crs:
-                print('crs landuse ', landuse_filtered.crs)
-                print('crs points ', points_gdf.crs)
-                landuse_filtered.set_crs("EPSG:28992", inplace=True)
-                landuse_filtered = landuse_filtered.to_crs(points_gdf.crs)
-                # points_gdf = points_gdf.to_crs(landuse_filtered.crs)
-                print('crs landuse ', landuse_filtered.crs)
-            print('points bbox now is ', points_gdf.total_bounds)
-            print('landuse filtered columns are ', landuse_filtered.columns)
-            print("Filtered landuse count:", len(landuse_filtered))
+                if len(landuse_gdf) == 0:
+                    print(f'Layer {layer_name} is empty')
+                    continue
 
-            # Process each point
-            # I get a warning here that says I should work with a copy but I don't want to I want to write to this specific one no?
-            joined_gdf = gpd.sjoin(points_gdf, landuse_filtered, how="left", predicate="intersects")
-            # It's this line: that points_gdf is being altered instead of a copy of it
-            points_gdf.loc[joined_gdf.index, 'landuse'] = layer_name
+                landuse_filtered = landuse_gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
+                # print('I filtered the landuse to bbox')
 
-            # Process each point for CBS data
-            # joined_gdf = gpd.sjoin(points_gdf, landuse_filtered, how="left", predicate="intersects")
-            # points_gdf['landuse'] = joined_gdf['description']
+                if landuse_filtered.crs is None:
+                    landuse_filtered.set_crs(original_crs, inplace=True)
 
+                if len(landuse_filtered) == 0:
+                    print(f'No features in bbox for layer {layer_name}')
+                    continue
 
-            i += 1
+                # Ensure CRS matches
+                if landuse_filtered.crs != points_gdf.crs:
+                    landuse_filtered = landuse_filtered.to_crs(points_gdf.crs)
+                    # points_gdf = points_gdf.to_crs(landuse_filtered.crs)
+                    # print('crs landuse ', landuse_filtered.crs)
+                # print('points bbox now is ', points_gdf.total_bounds)
+                # print('landuse filtered columns are ', landuse_filtered.columns)
+                # print("Filtered landuse count:", len(landuse_filtered))
+                    # Check for valid geometries
+                invalid_geoms = ~landuse_filtered.geometry.is_valid
+                if invalid_geoms.any():
+                    print(f'Found {invalid_geoms.sum()} invalid geometries. Attempting to fix...')
+                    landuse_filtered.geometry = landuse_filtered.geometry.buffer(0)
+                # Process each point
+                # I get a warning here that says I should work with a copy but I don't want to I want to write to this specific one no?
+                joined_gdf = gpd.sjoin(points_gdf, landuse_filtered, how="left", predicate="intersects")
+                matches_in_layer = len(joined_gdf[~joined_gdf.index_right.isna()])
+                print(f'Points with matches in this layer: {matches_in_layer}')
+                # It's this line: that points_gdf is being altered instead of a copy of it
+                # points_gdf.loc[joined_gdf.index, 'landuse'] = layer_name
+                # For each point that intersects with a landuse polygon, append the layer_name
+                for idx in joined_gdf.index[~joined_gdf.index_right.isna()]:
+                    if layer_name not in points_gdf.at[idx, 'landuse']:
+                        points_gdf.at[idx, 'landuse'].append(layer_name)
+                        points_with_landuse.add(idx)
+
+            except Exception as e:
+                print(f'Error processing layer {layer_name}: {str(e)}')
+                continue
+                # Process each point for CBS data
+                # joined_gdf = gpd.sjoin(points_gdf, landuse_filtered, how="left", predicate="intersects")
+                # points_gdf['landuse'] = joined_gdf['description']
+
+    # Convert landuse lists to strings for easier handling
+    points_gdf['landuse'] = points_gdf['landuse'].apply(lambda x: '; '.join(x) if x else None)
+    # Final statistics
+    total_points = len(points_gdf)
+    points_with_values = len(points_with_landuse)
+    points_without_values = total_points - points_with_values
+    # Create a summary of found landuse types
+    landuse_summary = points_gdf['landuse'].value_counts()
+    print("\nLanduse distribution:")
+    print(landuse_summary)
+
+    if points_without_values > 0:
+        missing_points = points_gdf[points_gdf['landuse'].isna()].head()
+        print('\nSample of points without landuse:')
+        print('Coordinates:')
+        print(missing_points.geometry.to_string())
 
     return points_gdf
 
@@ -369,8 +415,7 @@ def extract_unique_landuses(shapefile_path, output_file):
 
 
 # RUN
-# First, add landuse data to your shapefile
-add_landuse_to_shapefile('output/parameters/parameters_longest.shp', 'input/BGT/bgt_kanaalvanWalcheren')
+add_landuse_to_shapefile('output/parameters/parameters_longest.shp', 'input/BGT/bgt_area')
 extract_unique_landuses('output/parameters/parameters_longest.shp', 'output/parameters/unique_landuses.csv')
 
 # VISIBILITY------------------------------------------------------------------------------------------------------------
@@ -565,7 +610,7 @@ def read_single_cross_section(shapefile_path, cross_section_id):
 
 
 # Export all cross-sections to individual CSV files--------------------------------------------------------------------
-# export_cross_sections_to_csv('output/parameters/parameters_longest.shp', 'output/parameters/csv')
+export_cross_sections_to_csv('output/parameters/parameters_longest.shp', 'output/parameters/csv')
 
 
 
