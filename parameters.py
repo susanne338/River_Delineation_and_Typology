@@ -19,6 +19,7 @@ from rasterio.enums import Resampling
 from rasterio.warp import calculate_default_transform, reproject
 import matplotlib.pyplot as plt
 from shapely import wkt
+import fiona
 
 # CROSS-SECTION POINTS AND ELEVATION------------------------------------------------------------------------------------
 def create_cross_section_points(cross_sections_shapefile, n_points, output_shapefile):
@@ -207,7 +208,7 @@ def add_elevation_from_tiles(shapefile_path, tiles_folder, elevation_column_name
 
 def process_landuse(points_gdf, gpkg_folder):
     """
-    Add landuse information to points GeoDataFrame from gpkg files.
+    Add landuse information to points GeoDataFrame from gpkg files from BGT data.
 
     Args:
         points: geodataframe of points
@@ -217,55 +218,54 @@ def process_landuse(points_gdf, gpkg_folder):
         GeoDataFrame: Updated points with landuse information
     """
 
-    # Load the points shapefile into a GeoDataFrame
     # Initialize landuse column
+    points_gdf = points_gdf.to_crs(epsg=28992)
     points_gdf['landuse'] = None
-    print('bbox will be computed....')
+
     bbox = points_gdf.total_bounds
     print('I have found the bbox: ', bbox)
 
-    # Process each point
-    for idx in tqdm(points_gdf.index, desc="Processing landuse"):
-        point = points_gdf.loc[[idx]]
-        found_intersection = False
+    # Loop through gpkg files
+    i = 0
+    for gpkg_file in os.listdir(gpkg_folder):
+        print('index ', i)
+        if not gpkg_file.endswith('.gml'):
+            continue
+        gpkg_path = os.path.join(gpkg_folder, gpkg_file)
+        for layer_name in fiona.listlayers(gpkg_path):
+            print(f'Processing layer: {layer_name} in file: {gpkg_file}')
 
-        # Loop through gpkg files
-        for gpkg_file in os.listdir(gpkg_folder):
-            if not gpkg_file.endswith('.gpkg'):
-                continue
+            landuse_gdf = gpd.read_file(gpkg_path, layer=layer_name)
+            bounds_landuse = landuse_gdf.total_bounds
+            print('I have read the landuse file and its bounds are: ', bounds_landuse)
 
-            gpkg_path = os.path.join(gpkg_folder, gpkg_file)
-            print('path ', gpkg_path)
-            print('Reading landuse file...')
-            landuse_gdf = gpd.read_file(gpkg_path)
-            print('I have read the landuse file')
             landuse_filtered = landuse_gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
-            print('i filtered the landuse to bbox')
-
-            # debug-----------------------------------------------------
-            layers = gpd.io.file.fiona.listlayers(gpkg_path)
-            print("Layers in GeoPackage:", layers)
-            layer_name = layers[0]  # Example: selecting the first layer
-            gdf = gpd.read_file(gpkg_path, layer=layer_name)
-            print("Columns in layer:", gdf.columns)
-            # ---------------------------------------------------------
+            print('I filtered the landuse to bbox')
 
             # Ensure CRS matches
-            if landuse_filtered .crs != points_gdf.crs:
-                landuse_filtered  = landuse_filtered .to_crs(points_gdf.crs)
+            if landuse_filtered.crs != points_gdf.crs:
+                print('crs landuse ', landuse_filtered.crs)
+                print('crs points ', points_gdf.crs)
+                landuse_filtered.set_crs("EPSG:28992", inplace=True)
+                landuse_filtered = landuse_filtered.to_crs(points_gdf.crs)
+                # points_gdf = points_gdf.to_crs(landuse_filtered.crs)
+                print('crs landuse ', landuse_filtered.crs)
+            print('points bbox now is ', points_gdf.total_bounds)
+            print('landuse filtered columns are ', landuse_filtered.columns)
+            print("Filtered landuse count:", len(landuse_filtered))
 
-            print('ill spatially join the landuse with point')
-            # Direct spatial join with point
-            joined = gpd.sjoin(point, landuse_filtered , how="left", predicate="within")
+            # Process each point
+            # I get a warning here that says I should work with a copy but I don't want to I want to write to this specific one no?
+            joined_gdf = gpd.sjoin(points_gdf, landuse_filtered, how="left", predicate="intersects")
+            # It's this line: that points_gdf is being altered instead of a copy of it
+            points_gdf.loc[joined_gdf.index, 'landuse'] = layer_name
 
-            # Check if we found an intersection
-            if not joined['description'].isna().all():
-                points_gdf.loc[idx, 'landuse'] = joined['description'].iloc[0]
-                found_intersection = True
-                break  # Exit gpkg loop since we found an intersection
+            # Process each point for CBS data
+            # joined_gdf = gpd.sjoin(points_gdf, landuse_filtered, how="left", predicate="intersects")
+            # points_gdf['landuse'] = joined_gdf['description']
 
-        if not found_intersection:
-            print(f"Warning: No landuse intersection found for point {idx}")
+
+            i += 1
 
     return points_gdf
 
@@ -336,7 +336,7 @@ def add_landuse_to_shapefile(shapefile_path, gpkg_folder):
     """
     # Read the shapefile
     gdf = gpd.read_file(shapefile_path)
-    print('The shapefile has been read!')
+    print('The shapefile has been read! its columns are: ', gdf.columns)
 
     # Add landuse information
     gdf = process_landuse(gdf, gpkg_folder)
@@ -370,8 +370,8 @@ def extract_unique_landuses(shapefile_path, output_file):
 
 # RUN
 # First, add landuse data to your shapefile
-add_landuse_to_shapefile('output/parameters/parameters_longest.shp', 'input/CBS')
-extract_unique_landuses('output/parameters/parameters_longest.shp', 'output/parameters/uniques_landuses.csv')
+add_landuse_to_shapefile('output/parameters/parameters_longest.shp', 'input/BGT/bgt_kanaalvanWalcheren')
+extract_unique_landuses('output/parameters/parameters_longest.shp', 'output/parameters/unique_landuses.csv')
 
 # VISIBILITY------------------------------------------------------------------------------------------------------------
 
@@ -561,9 +561,15 @@ def read_single_cross_section(shapefile_path, cross_section_id):
 # Look at parameter shapefile
 # analyze_cross_section_data('output/parameters/parameters_longest.shp')
 
-# Export all cross-sections to individual CSV files
-export_cross_sections_to_csv('output/parameters/parameters_longest.shp', 'output/parameters/csv')
-#
+
+
+
+# Export all cross-sections to individual CSV files--------------------------------------------------------------------
+# export_cross_sections_to_csv('output/parameters/parameters_longest.shp', 'output/parameters/csv')
+
+
+
+
 # gdf = gpd.read_file('output/parameters/parameters_longest.shp')
 # missing_dsm = gdf['elev_dsm'].isnull().sum()
 # print(f"Number of missing values in 'elev_dsm': {missing_dsm}")
