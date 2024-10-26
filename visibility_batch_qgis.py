@@ -2,7 +2,6 @@
 Run this script in the python console in qgis. Can't run from here because 'processing' uses an old python? One of the wheels is in python2x and can't be installed.
 Change input paths as needed.
 Change output path as needed.
-TODO: right now, it takes a general observer height but may need to adapt to cross-section.
 """
 
 import processing
@@ -15,12 +14,12 @@ else:
     print(f"Loaded {points_layer.featureCount()} features.")
 
 # Path to the DEM raster for viewshed analysis
-dem_path = '/thesis_output/trash/clipped_total.tif'
+dem_path = 'C:/Users/susan/Documents/thesis/Thesis-terminal/thesis_output/AHN_tiles_DSM/clipped_total.tif'
 
 
 # Loop through each point in the shapefile
 for i, feature in enumerate(points_layer.getFeatures()):
-    if   i <= 5:
+    if   i > 5:
         point_geom = feature.geometry().asPoint()  # Get the point's geometry as a coordinate (x, y)
         print('point geometry and feature id: ', point_geom, feature.id())
         point_id = feature.id()  # Get the ID of the point feature

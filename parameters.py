@@ -2,7 +2,9 @@
 Computers parameter table
 --> creates points at cross-section and initializes shapefile with all points. Each point has a cross-section id
 --> add elevation values to the points in the shapefile
-TODO: landuse
+--> add landuse values
+--> add visibility values
+TODO: landuse, visibility (both points and delineation)
 """
 
 import geopandas as gpd
@@ -16,6 +18,7 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio.warp import calculate_default_transform, reproject
 import matplotlib.pyplot as plt
+from shapely import wkt
 
 # CROSS-SECTION POINTS AND ELEVATION------------------------------------------------------------------------------------
 def create_cross_section_points(cross_sections_shapefile, n_points, output_shapefile):
@@ -179,7 +182,7 @@ def add_elevation_from_tiles(shapefile_path, tiles_folder, elevation_column_name
     return points_gdf
 
 # RUN SCRIPTS
-# create the corss-section points and initialize the shapefile
+# create the cross-section points and initialize the shapefile
 # create_cross_section_points(
 #     cross_sections_shapefile='thesis_output/cross_sections/cross_sections_longest.shp',
 #     n_points=100,
@@ -199,6 +202,273 @@ def add_elevation_from_tiles(shapefile_path, tiles_folder, elevation_column_name
 #     tiles_folder='thesis_output/AHN_tiles_DSM',
 #     elevation_column_name='elev_dsm'
 # )
+
+# LANDUSE---------------------------------------------------------------------------------------------------------------
+
+def process_landuse(points_gdf, gpkg_folder):
+    """
+    Add landuse information to points GeoDataFrame from gpkg files.
+
+    Args:
+        points: geodataframe of points
+        gpkg_file: Folder containing .gpkg files
+
+    Returns:
+        GeoDataFrame: Updated points with landuse information
+    """
+
+    # Load the points shapefile into a GeoDataFrame
+    # Initialize landuse column
+    points_gdf['landuse'] = None
+    print('bbox will be computed....')
+    bbox = points_gdf.total_bounds
+    print('I have found the bbox: ', bbox)
+
+    # Process each point
+    for idx in tqdm(points_gdf.index, desc="Processing landuse"):
+        point = points_gdf.loc[[idx]]
+        found_intersection = False
+
+        # Loop through gpkg files
+        for gpkg_file in os.listdir(gpkg_folder):
+            if not gpkg_file.endswith('.gpkg'):
+                continue
+
+            gpkg_path = os.path.join(gpkg_folder, gpkg_file)
+            print('path ', gpkg_path)
+            print('Reading landuse file...')
+            landuse_gdf = gpd.read_file(gpkg_path)
+            print('I have read the landuse file')
+            landuse_filtered = landuse_gdf.cx[bbox[0]:bbox[2], bbox[1]:bbox[3]]
+            print('i filtered the landuse to bbox')
+
+            # debug-----------------------------------------------------
+            layers = gpd.io.file.fiona.listlayers(gpkg_path)
+            print("Layers in GeoPackage:", layers)
+            layer_name = layers[0]  # Example: selecting the first layer
+            gdf = gpd.read_file(gpkg_path, layer=layer_name)
+            print("Columns in layer:", gdf.columns)
+            # ---------------------------------------------------------
+
+            # Ensure CRS matches
+            if landuse_filtered .crs != points_gdf.crs:
+                landuse_filtered  = landuse_filtered .to_crs(points_gdf.crs)
+
+            print('ill spatially join the landuse with point')
+            # Direct spatial join with point
+            joined = gpd.sjoin(point, landuse_filtered , how="left", predicate="within")
+
+            # Check if we found an intersection
+            if not joined['description'].isna().all():
+                points_gdf.loc[idx, 'landuse'] = joined['description'].iloc[0]
+                found_intersection = True
+                break  # Exit gpkg loop since we found an intersection
+
+        if not found_intersection:
+            print(f"Warning: No landuse intersection found for point {idx}")
+
+    return points_gdf
+
+# THIS IS FOR THE FOLDER OF GPKG BUT IT TAKES FOREVER
+# def process_landuse(points_gdf, gpkg_folder):
+#     """
+#     Add landuse information to points GeoDataFrame from GeoPackage files.
+#
+#     Args:
+#         points_gdf: GeoDataFrame containing points
+#         gpkg_folder: Folder containing .gpkg files
+#
+#     Returns:
+#         GeoDataFrame: Updated points with landuse information
+#     """
+#     # Initialize landuse column
+#     points_gdf['landuse'] = None
+#
+#     # Process each point
+#     for idx in tqdm(points_gdf.index, desc="Processing landuse"):
+#         point = points_gdf.loc[[idx]]
+#         found_intersection = False
+#
+#         # Loop through each GeoPackage file
+#         for gpkg_file in os.listdir(gpkg_folder):
+#             if not gpkg_file.endswith('.gpkg'):
+#                 continue
+#
+#             gpkg_path = os.path.join(gpkg_folder, gpkg_file)
+#
+#             # Loop over each layer in the GeoPackage
+#             layers = gpd.io.file.fiona.listlayers(gpkg_path)
+#             for layer_name in layers:
+#                 landuse_gdf = gpd.read_file(gpkg_path, layer=layer_name)
+#
+#                 # Check if the 'plus-type' column exists in this layer
+#                 if 'plus-type' not in landuse_gdf.columns:
+#                     continue
+#
+#                 # Ensure CRS matches
+#                 if landuse_gdf.crs != points_gdf.crs:
+#                     landuse_gdf = landuse_gdf.to_crs(points_gdf.crs)
+#
+#                 # Perform spatial join with the point
+#                 joined = gpd.sjoin(point, landuse_gdf, how="left", predicate="within")
+#
+#                 # Check if we found an intersection
+#                 if not joined['plus-type'].isna().all():
+#                     points_gdf.loc[idx, 'landuse'] = joined['plus-type'].iloc[0]
+#                     found_intersection = True
+#                     break  # Exit layer loop since we found an intersection
+#
+#             if found_intersection:
+#                 break  # Exit GeoPackage loop if we found an intersection
+#
+#         if not found_intersection:
+#             print(f"Warning: No landuse intersection found for point {idx}")
+#
+#     return points_gdf
+
+def add_landuse_to_shapefile(shapefile_path, gpkg_folder):
+    """
+    Reads a shapefile, adds landuse information from gpkg files, and saves the updated shapefile.
+
+    Parameters:
+        shapefile_path: Path to the shapefile containing all cross-section points
+        gpkg_folder: Folder containing landuse .gpkg files
+    """
+    # Read the shapefile
+    gdf = gpd.read_file(shapefile_path)
+    print('The shapefile has been read!')
+
+    # Add landuse information
+    gdf = process_landuse(gdf, gpkg_folder)
+    print("landuse is added to the geodataframe!")
+
+    # Save updated shapefile
+    gdf.to_file(shapefile_path)
+    print(f"Updated shapefile saved to: {shapefile_path}")
+
+
+def extract_unique_landuses(shapefile_path, output_file):
+    """
+    Extract unique landuse values from a shapefile.
+
+    Args:
+        shapefile_path: Path to the shapefile containing landuse information
+        output_file: Path to save the unique landuses CSV
+    """
+    # Read the shapefile as a GeoDataFrame
+    points_gdf = gpd.read_file(shapefile_path)
+
+    # Extract unique landuse values
+    unique_landuses = points_gdf['landuse'].dropna().unique()
+
+    # Convert to DataFrame and save to CSV
+    landuses_df = pd.DataFrame(unique_landuses, columns=['landuse'])
+    landuses_df.to_csv(output_file, index=False)
+
+    print(f"Unique landuses saved to: {output_file}")
+
+
+# RUN
+# First, add landuse data to your shapefile
+add_landuse_to_shapefile('output/parameters/parameters_longest.shp', 'input/CBS')
+extract_unique_landuses('output/parameters/parameters_longest.shp', 'output/parameters/uniques_landuses.csv')
+
+# VISIBILITY------------------------------------------------------------------------------------------------------------
+
+def check_visibility(location, viewshed_file):
+    """
+    Checks the visibility of a point based on the viewshed raster.
+
+    Parameters:
+        location (Point): The geometry (Shapely Point object) representing the point's location.
+        viewshed_file (str): The file path to the viewshed raster.
+
+    Returns:
+        int: Pixel value at the point's location (1 for visible, 0 for not visible, other for different values).
+    """
+    with rasterio.open(viewshed_file) as src:
+        # Read the viewshed data from the first band
+        viewshed_data = src.read(1)
+
+        # Extract coordinates from the Point object
+        x, y = location.x, location.y
+
+        # Get the row, col index of the pixel corresponding to the point
+        row, col = src.index(x, y)
+
+        # Read the pixel value at the point's location
+        pixel_value = viewshed_data[row, col]
+
+        # Check the visibility based on the pixel value
+        if pixel_value == 1:
+            print(f"The point at ({x}, {y}) is visible.")
+        elif pixel_value == 0:
+            print(f"The point at ({x}, {y}) is not visible.")
+        else:
+            print(f"The pixel value at ({x}, {y}) is: {pixel_value}")
+
+    return pixel_value
+
+
+# Function to apply visibility check for each row in the GeoDataFrame
+def compute_visibility(row, viewshed_file):
+    """
+    Compute visibility for a given row in the GeoDataFrame using the viewshed raster.
+
+    Parameters:
+        row: A row of the GeoDataFrame.
+        viewshed_file (str): The file path to the viewshed raster.
+
+    Returns:
+        int: The visibility value (pixel value from the viewshed raster).
+    """
+    location = row['geometry']  # The Point object (geometry)
+
+    # Call the visibility function using the location and the viewshed file
+    return check_visibility(location, viewshed_file)
+
+
+# Apply the compute_visibility function to each row in the GeoDataFrame
+def add_visibility_column(gdf, viewshed_file):
+    """
+    Adds a 'visibility' column to the GeoDataFrame by checking the visibility of each point.
+
+    Parameters:
+        gdf (GeoDataFrame): The GeoDataFrame containing point geometries.
+        viewshed_file (str): The file path to the viewshed raster.
+
+    Returns:
+        GeoDataFrame: The updated GeoDataFrame with a new 'visibility' column.
+    """
+    gdf['visibility'] = gdf.apply(compute_visibility, axis=1, viewshed_file=viewshed_file)
+    return gdf
+
+
+def load_csv_to_geodataframe(csv_file):
+    """
+    Loads a CSV file into a GeoDataFrame, converting coordinate columns into Point geometries.
+
+    Parameters:
+        csv_file (str): Path to the CSV file.
+
+    Returns:
+        GeoDataFrame: A GeoDataFrame with Point geometries.
+    """
+    # Load the CSV into a DataFrame
+    df = pd.read_csv(csv_file)
+    # geometry is a string but needs to be POINT objects
+    df['geometry'] = df['geometry'].apply(wkt.loads)
+
+    # Convert the DataFrame into a GeoDataFrame, specifying that the 'geometry' column contains Point geometries
+    gdf = gpd.GeoDataFrame(df, geometry='geometry')
+
+    return gdf
+
+# parameters = 'output/parameters/parameters_longest.shp'
+# gdf_csv = load_csv_to_geodataframe(parameters)
+# viewshed_file = 'thesis_output/visibility/combined_viewshed.tif'
+# gdf_with_vis = add_visibility_column(gdf_csv, viewshed_file)
+# gdf_with_vis.to_file('output/parameters/parameters_longest.shp', driver='ESRI Shapefile')
 
 # CHECK DATA IN PARAMETER TABLE----------------------------------------------------------------------------------------
 def export_cross_sections_to_csv(shapefile_path, output_folder):
@@ -228,8 +498,8 @@ def export_cross_sections_to_csv(shapefile_path, output_folder):
             'y': group.y,
             'h_distance': group.h_distance,
             'elev_dtm': group.elev_dtm if 'elev_dtm' in group.columns else None,
-            'elev_dsm': group.elev_dsm if 'elev_dsm' in group.columns else None
-        #     There is a problem here: nodata is either None or '3.402823466385289e+23
+            'elev_dsm': group.elev_dsm if 'elev_dsm' in group.columns else None,
+            'landuse' : group.landuse
         })
 
         # Save to CSV
@@ -292,7 +562,7 @@ def read_single_cross_section(shapefile_path, cross_section_id):
 # analyze_cross_section_data('output/parameters/parameters_longest.shp')
 
 # Export all cross-sections to individual CSV files
-# export_cross_sections_to_csv('output/parameters/parameters_longest.shp', 'output/parameters/csv')
+export_cross_sections_to_csv('output/parameters/parameters_longest.shp', 'output/parameters/csv')
 #
 # gdf = gpd.read_file('output/parameters/parameters_longest.shp')
 # missing_dsm = gdf['elev_dsm'].isnull().sum()
@@ -302,7 +572,7 @@ def read_single_cross_section(shapefile_path, cross_section_id):
 # missing_dtm = gdf['elev_dtm'].isnull().sum()
 # print(f"Number of missing values in 'elev_dtm': {missing_dtm}")
 
-# PLOT
+# PLOT ELEVATIONS
 def plot_csv_parameters(csv_path):
     # Load the CSV file
     df = pd.read_csv(csv_path)  # Replace 'your_file.csv' with your actual file path
@@ -332,5 +602,3 @@ def plot_csv_parameters(csv_path):
     plt.show()
 
 # plot_csv_parameters('output/parameters/csv/cross_section_0.csv')
-
-# LANDUSE---------------------------------------------------------------------------------------------------------------
