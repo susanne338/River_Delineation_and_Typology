@@ -12,26 +12,21 @@ from shapely.geometry import LineString, Point
 import numpy as np
 
 
-def cross_section_extraction(river, interval, width, output_gdf, output_file_1, output_file_2, output_river_mid):
+def cross_section_extraction(river_file, interval, width, output_file_cs, output_river_mid):
     """
     Get cross-sections
-    :param output_file_2:  output shapefile for cross-sections 2
-    :param output_file_1:  output shapefile for cross-sections 1
-    :param output_gdf: output shapefile for all cross-sections
+    :param output_file_cs: output shapefile for all cross-sections
     :param width: width of total cross-section
     :param interval: width between cross-sections
     :param river: River geodataframe
-    :return: gdf, gdf_1, gdf_2, cross_sections_1, cross_sections_2, index_list
+    :param output_river_mid: Output file for river midpoints
+    :return: gdf
     """
-
+    river = gpd.read_file(river_file)
     projected_gdf = river.to_crs(epsg=28992)
-    # riverline = projected_gdf.geometry.iloc[0] # This takes the LineString from the geopanda geodataframe
-    # print("riverline legth: ", riverline.length)
     cross_sections = []
-    # cross_sections_1 = []
-    # cross_sections_2 = []
-    # index_list = []
     river_points = []
+
     for index, row in projected_gdf.iterrows():
         riverline = row['geometry']
 
@@ -42,34 +37,14 @@ def cross_section_extraction(river, interval, width, output_gdf, output_file_1, 
             cross_sections.append(cross_section)
             river_points.append(point_on_line)
 
-            # print('type ', type(cross_section)) #linestring
-            # Split in two
-            # p1 = cross_section.coords[0]
-            # # print('point and type ', p1, type(p1)) #point is a tuple
-            # p2 = cross_section.coords[-1]
-            # midpoint = Point((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
-            # line1 = LineString([midpoint, p1])  # From the first point to the midpoint
-            # line2 = LineString([midpoint, p2])  # From the midpoint to the second point
-            # cross_sections_1.append(line1)
-            # cross_sections_2.append(line2)
-            # index_list.append(index)
-
+    # Save cross-sections to a Shapefile (.shp)
     gdf = gpd.GeoDataFrame(geometry=cross_sections)
     gdf.set_crs(epsg=28992, inplace=True)
-    # gdf_1 = gpd.GeoDataFrame(geometry=cross_sections_1)
-    # # Set the correct Coordinate Reference System (CRS) - replace with your appropriate EPSG code
-    # gdf_1.set_crs(epsg=28992, inplace=True)
-    # gdf_2 = gpd.GeoDataFrame(geometry=cross_sections_2)
-    # # Set the correct Coordinate Reference System (CRS) - replace with your appropriate EPSG code
-    # gdf_2.set_crs(epsg=28992, inplace=True)
+    gdf.to_file(output_file_cs, driver='ESRI Shapefile')
 
-    # Save to a Shapefile (.shp)
-    gdf.to_file(output_gdf, driver='ESRI Shapefile')
-    # gdf_1.to_file(output_file_1, driver='ESRI Shapefile')
-    # gdf_2.to_file(output_file_2, driver='ESRI Shapefile')
-
-    # Save river mispoints to file
+    # Save river midpoints to shapefile (.shp)
     river_points_gdf = gpd.GeoDataFrame(geometry=river_points)
+    river_points_gdf.set_crs(epsg=28992, inplace=True)
     river_points_gdf.to_file(output_river_mid, driver='ESRI Shapefile')
 
     return gdf
@@ -108,7 +83,5 @@ def get_perpendicular_cross_section(line, distance_along_line, width):
 
 
 # Collecting a lot of cross-sections for river space delineation
-output_file_river = "../river_shapefiles/longest_river.shp"
-gdf_river = gpd.read_file(output_file_river)
-cross_section_extraction(gdf_river, 0.5, 250, 'cross_sections/cs_interval0_5', '../cross_sections/cs_1_interval0_5',
-                         'cross_sections/cs_2_interval0_5')
+output_file_river = "thesis_output/river_shapefiles/longest_river.shp"
+cross_section_extraction(output_file_river, 100, 250, "output/cross_sections/cross_sections.shp", "output/cross_sections/cross_sections_midpoints.shp" )
