@@ -2,7 +2,7 @@
 Computes the viewsheds and combines them.
 Uses the computes viewsheds to compute the visible points ratio for river midpoints
 and can check if a point in the profile is visible from midpoint
-TODO: loop over combined_viewsheds for each point. Fix profiles. There are too many profiles, probably stemming from not using longest_river
+TODO: make ratio_visibility add to metric table
 """
 import rasterio
 import numpy as np
@@ -19,6 +19,7 @@ from shapely.ops import unary_union
 import geopandas as gpd
 from shapely import wkt #Creates geometries from the Well-Known Text (WKT) representation.
 
+# VIEWSHED BATCH
 # First run the visibility_batch_qgis.py script in the python console within QGIS. This gives all binary viewsheds for the river from the midpoints.
 
 # COMBINE VIEWSHEDS INTO ONE TIF----------------------------------------------------------------------------
@@ -180,12 +181,12 @@ input_raster = 'C:/Users/susan/Documents/thesis/Thesis-terminal/thesis_output/vi
 output_dir = 'C:/Users/susan/Documents/thesis/Thesis-terminal/thesis_output/visibility'
 output_shapefile = os.path.join(output_dir, 'viewshed_boundary.shp')
 
-# 1 gives very patchy
+# 1 gives patchy
 smooth_tolerance = 1.0
 min_area = 100
-
-
 # raster_to_polygon(input_raster, output_shapefile, smooth_tolerance, min_area)
+
+
 
 # VISIBILITY PARAMETERS------------------------------------------------------------------------------------
 # ONE VALUE FOR WHOLE CROSS-SECTION
@@ -230,102 +231,3 @@ def ratio_visibility(viewshed_file, radius, midpoints_file_used_for_visibility, 
         return percentage_visible
 
 # ratio_visibility('visibility/viewshed_0.tif', 100, 'river_shapefiles/river_midpoints_elev_2m.shp', 0)
-
-# CHECK VISIBILITY PER POINT
-
-def check_visibility(location, viewshed_file):
-    """
-    Checks the visibility of a point based on the viewshed raster.
-
-    Parameters:
-        location (Point): The geometry (Shapely Point object) representing the point's location.
-        viewshed_file (str): The file path to the viewshed raster.
-
-    Returns:
-        int: Pixel value at the point's location (1 for visible, 0 for not visible, other for different values).
-    """
-    with rasterio.open(viewshed_file) as src:
-        # Read the viewshed data from the first band
-        viewshed_data = src.read(1)
-
-        # Extract coordinates from the Point object
-        x, y = location.x, location.y
-
-        # Get the row, col index of the pixel corresponding to the point
-        row, col = src.index(x, y)
-
-        # Read the pixel value at the point's location
-        pixel_value = viewshed_data[row, col]
-
-        # Check the visibility based on the pixel value
-        if pixel_value == 1:
-            print(f"The point at ({x}, {y}) is visible.")
-        elif pixel_value == 0:
-            print(f"The point at ({x}, {y}) is not visible.")
-        else:
-            print(f"The pixel value at ({x}, {y}) is: {pixel_value}")
-
-    return pixel_value
-
-
-# Function to apply visibility check for each row in the GeoDataFrame
-def compute_visibility(row, viewshed_file):
-    """
-    Compute visibility for a given row in the GeoDataFrame using the viewshed raster.
-
-    Parameters:
-        row: A row of the GeoDataFrame.
-        viewshed_file (str): The file path to the viewshed raster.
-
-    Returns:
-        int: The visibility value (pixel value from the viewshed raster).
-    """
-    location = row['geometry']  # The Point object (geometry)
-
-    # Call the visibility function using the location and the viewshed file
-    return check_visibility(location, viewshed_file)
-
-
-# Apply the compute_visibility function to each row in the GeoDataFrame
-def add_visibility_column(gdf, viewshed_file):
-    """
-    Adds a 'visibility' column to the GeoDataFrame by checking the visibility of each point.
-
-    Parameters:
-        gdf (GeoDataFrame): The GeoDataFrame containing point geometries.
-        viewshed_file (str): The file path to the viewshed raster.
-
-    Returns:
-        GeoDataFrame: The updated GeoDataFrame with a new 'visibility' column.
-    """
-    gdf['visibility'] = gdf.apply(compute_visibility, axis=1, viewshed_file=viewshed_file)
-    return gdf
-
-
-def load_csv_to_geodataframe(csv_file):
-    """
-    Loads a CSV file into a GeoDataFrame, converting coordinate columns into Point geometries.
-
-    Parameters:
-        csv_file (str): Path to the CSV file.
-
-    Returns:
-        GeoDataFrame: A GeoDataFrame with Point geometries.
-    """
-    # Load the CSV into a DataFrame
-    df = pd.read_csv(csv_file)
-    # geometry is a string but needs to be POINT objects
-    df['geometry'] = df['geometry'].apply(wkt.loads)
-
-    # Convert the DataFrame into a GeoDataFrame, specifying that the 'geometry' column contains Point geometries
-    gdf = gpd.GeoDataFrame(df, geometry='geometry')
-
-    return gdf
-
-landuse_profile_csv = 'thesis_output/profiles/left/0_left.csv'
-gdf_csv = load_csv_to_geodataframe(landuse_profile_csv)
-viewshed_file = 'thesis_output/visibility/viewshed_0.tif'
-gdf_with_vis = add_visibility_column(gdf_csv, viewshed_file)
-gdf_with_vis.to_csv('thesis_output/trash/Testcsv.csv', index=False)
-
-gdf_with_vis.to_file('thesis_output/trash/test_shp.shp', driver='ESRI Shapefile')

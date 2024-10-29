@@ -4,7 +4,6 @@ Computers parameter table
 --> add elevation values to the points in the shapefile
 --> add landuse values
 --> add visibility values
-TODO: landuse, visibility (both points and delineation)
 """
 
 import geopandas as gpd
@@ -315,62 +314,6 @@ def process_landuse(points_gdf, gpkg_folder):
 
     return points_gdf
 
-# THIS IS FOR THE FOLDER OF GPKG BUT IT TAKES FOREVER
-# def process_landuse(points_gdf, gpkg_folder):
-#     """
-#     Add landuse information to points GeoDataFrame from GeoPackage files.
-#
-#     Args:
-#         points_gdf: GeoDataFrame containing points
-#         gpkg_folder: Folder containing .gpkg files
-#
-#     Returns:
-#         GeoDataFrame: Updated points with landuse information
-#     """
-#     # Initialize landuse column
-#     points_gdf['landuse'] = None
-#
-#     # Process each point
-#     for idx in tqdm(points_gdf.index, desc="Processing landuse"):
-#         point = points_gdf.loc[[idx]]
-#         found_intersection = False
-#
-#         # Loop through each GeoPackage file
-#         for gpkg_file in os.listdir(gpkg_folder):
-#             if not gpkg_file.endswith('.gpkg'):
-#                 continue
-#
-#             gpkg_path = os.path.join(gpkg_folder, gpkg_file)
-#
-#             # Loop over each layer in the GeoPackage
-#             layers = gpd.io.file.fiona.listlayers(gpkg_path)
-#             for layer_name in layers:
-#                 landuse_gdf = gpd.read_file(gpkg_path, layer=layer_name)
-#
-#                 # Check if the 'plus-type' column exists in this layer
-#                 if 'plus-type' not in landuse_gdf.columns:
-#                     continue
-#
-#                 # Ensure CRS matches
-#                 if landuse_gdf.crs != points_gdf.crs:
-#                     landuse_gdf = landuse_gdf.to_crs(points_gdf.crs)
-#
-#                 # Perform spatial join with the point
-#                 joined = gpd.sjoin(point, landuse_gdf, how="left", predicate="within")
-#
-#                 # Check if we found an intersection
-#                 if not joined['plus-type'].isna().all():
-#                     points_gdf.loc[idx, 'landuse'] = joined['plus-type'].iloc[0]
-#                     found_intersection = True
-#                     break  # Exit layer loop since we found an intersection
-#
-#             if found_intersection:
-#                 break  # Exit GeoPackage loop if we found an intersection
-#
-#         if not found_intersection:
-#             print(f"Warning: No landuse intersection found for point {idx}")
-#
-#     return points_gdf
 
 def add_landuse_to_shapefile(shapefile_path, gpkg_folder):
     """
@@ -415,11 +358,69 @@ def extract_unique_landuses(shapefile_path, output_file):
 
 
 # RUN
-add_landuse_to_shapefile('output/parameters/parameters_longest.shp', 'input/BGT/bgt_area')
-extract_unique_landuses('output/parameters/parameters_longest.shp', 'output/parameters/unique_landuses.csv')
+# I work with bgt_area now. I do not convert the file anymoer because the conversion gives me errors.
+# I loop over all .gml files. Results in missing values sometimes.
+# add_landuse_to_shapefile('output/parameters/parameters_longest.shp', 'input/BGT/bgt_area')
+# extract_unique_landuses('output/parameters/parameters_longest.shp', 'output/parameters/unique_landuses.csv')
+
+# check missing values, check shapefile-------------------------------------------
+# shapefile_path = 'output/parameters/parameters_longest.shp'
+# gdf = gpd.read_file(shapefile_path)
+# # Check for missing values
+# print("Columns in the shapefile:", gdf.columns.tolist())
+# # ['id', 'h_distance', 'elev_dtm', 'elev_dsm', 'landuse', 'geometry']
+# missing_landuse_count = gdf['landuse'].isna().sum()
+# missing_dtm_count = gdf['elev_dtm'].isna().sum()
+# missing_dsm_count = gdf['elev_dsm'].isna().sum()
+# print(f"Number of missing values in 'landuse, dtm and dsm': {missing_landuse_count} , {missing_dtm_count}, {missing_dsm_count}")
+
+# Number of missing values is 371, 5239, 4111
+
+
+# IMPERVIOUSNESS
+def check_imperviousness(location, imperviousness_raster):
+    with rasterio.open(imperviousness_raster) as src:
+        # read band 1 (number between 1-100)
+        imperviousness_data = src.read(1)
+
+        # Extract coordinates from the Point object
+        x, y = location.x, location.y
+
+        # Get the row, col index of the pixel corresponding to the point
+        row, col = src.index(x, y)
+
+        # Read the pixel value at the point's location
+        pixel_value = imperviousness_data[row, col]
+        print(f"The pixel value at ({x}, {y}) is: {pixel_value}")
+        return pixel_value
+
+def compute_imperviousness(row, imperviousness_raster):
+    location = row['geometry']
+    return check_imperviousness(location, imperviousness_raster)
+
+def add_imperviousness_column(shapefile, imperviousness_raster):
+    gdf = gpd.read_file(shapefile)
+    tqdm.pandas(desc="Computing impreviousness for each point")
+    gdf['imperv'] = gdf.progress_apply(compute_imperviousness, axis=1, imperviousness_raster=imperviousness_raster)
+    gdf.to_file(shapefile)
+    print(f"Updated shapefile saved to: {shapefile}")
+    return
+
+
+
+# imperviouness_data = 'input/imperviousness/imperv_reproj_28992.tif'
+# shapefile_path = 'output/parameters/parameters_longest.shp'
+# add_imperviousness_column(shapefile_path, imperviouness_data)
+
+# shapefile_path = 'output/parameters/parameters_longest.shp'
+# gdf = gpd.read_file(shapefile_path)
+# print("Columns in the shapefile:", gdf.columns.tolist())
+# missing_imperv_count = gdf['imperv'].isna().sum()
+# print(f"Missing imperviousness is {missing_imperv_count} ")
+# gdf.to_csv("only_to_check.csv", index=False)
 
 # VISIBILITY------------------------------------------------------------------------------------------------------------
-
+# Before running visibility, it needs to run the viewshed function first, which implies running the metric function first
 def check_visibility(location, viewshed_file):
     """
     Checks the visibility of a point based on the viewshed raster.
@@ -474,7 +475,7 @@ def compute_visibility(row, viewshed_file):
 
 
 # Apply the compute_visibility function to each row in the GeoDataFrame
-def add_visibility_column(gdf, viewshed_file):
+def add_visibility_column(shapefile, viewshed_file):
     """
     Adds a 'visibility' column to the GeoDataFrame by checking the visibility of each point.
 
@@ -485,8 +486,17 @@ def add_visibility_column(gdf, viewshed_file):
     Returns:
         GeoDataFrame: The updated GeoDataFrame with a new 'visibility' column.
     """
-    gdf['visibility'] = gdf.apply(compute_visibility, axis=1, viewshed_file=viewshed_file)
-    return gdf
+    gdf = gpd.read_file(shapefile)
+    # I replace the following line to add a tqdm progress tracker
+    # gdf['visibility'] = gdf.apply(compute_visibility, axis=1, viewshed_file=viewshed_file)
+
+    # Initialize tqdm to add progress bar support for the apply function
+    tqdm.pandas(desc="Computing visibility for each point")
+    gdf['visibility'] = gdf.progress_apply(compute_visibility, axis=1, viewshed_file=viewshed_file)
+
+    gdf.to_file(shapefile)
+    print(f"Updated shapefile saved to: {shapefile}")
+    return
 
 
 def load_csv_to_geodataframe(csv_file):
@@ -509,11 +519,18 @@ def load_csv_to_geodataframe(csv_file):
 
     return gdf
 
+# RUN VISIBILITY
+# I would say this took like an hour or so
 # parameters = 'output/parameters/parameters_longest.shp'
-# gdf_csv = load_csv_to_geodataframe(parameters)
 # viewshed_file = 'thesis_output/visibility/combined_viewshed.tif'
-# gdf_with_vis = add_visibility_column(gdf_csv, viewshed_file)
-# gdf_with_vis.to_file('output/parameters/parameters_longest.shp', driver='ESRI Shapefile')
+# gdf_with_vis = add_visibility_column(parameters, viewshed_file)
+# gdf = gpd.read_file('output/parameters/parameters_longest.shp')
+# print("Columns in the shapefile:", gdf.columns.tolist())
+# gdf = gpd.read_file('output/cross_sections/cross_sections_midpoints.shp')
+# print('columns ', gdf.columns.tolist())
+# missing_visible_count = gdf['visibility'].isna().sum()
+# print(f"Number of missing values in 'visbility': {missing_visible_count}")
+
 
 # CHECK DATA IN PARAMETER TABLE----------------------------------------------------------------------------------------
 def export_cross_sections_to_csv(shapefile_path, output_folder):
@@ -610,7 +627,7 @@ def read_single_cross_section(shapefile_path, cross_section_id):
 
 
 # Export all cross-sections to individual CSV files--------------------------------------------------------------------
-export_cross_sections_to_csv('output/parameters/parameters_longest.shp', 'output/parameters/csv')
+# export_cross_sections_to_csv('output/parameters/parameters_longest.shp', 'output/parameters/csv')
 
 
 

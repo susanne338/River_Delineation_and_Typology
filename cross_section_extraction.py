@@ -83,5 +83,5 @@ def get_perpendicular_cross_section(line, distance_along_line, width):
 
 
 # Collecting a lot of cross-sections for river space delineation
-output_file_river = "thesis_output/river_shapefiles/longest_river.shp"
-cross_section_extraction(output_file_river, 100, 250, "output/cross_sections/cross_sections.shp", "output/cross_sections/cross_sections_midpoints.shp" )
+output_file_river = "input/river/longest_river.shp"
+cross_section_extraction(output_file_river, 0.5, 250, "output/cross_sections/cross_sections_int05.shp", "output/cross_sections/cross_sections_midpoints_int05.shp" )
