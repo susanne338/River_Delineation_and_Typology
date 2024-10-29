@@ -3,7 +3,7 @@ Delineates the river space based on first line of buildings. Uses cross-section 
 Only 2D points for boundary line
 TODO: As the river bends, cross-sections miss so also perform it from a buffer line.
 TODO: smoothen line?
-TODO: Instead of taking intersection with buffer, take last point on cross-section
+TODO: Instead of taking intersection with buffer, take last point on cross-section. Makes way more sense
 """
 import geopandas as gpd
 import numpy as np
