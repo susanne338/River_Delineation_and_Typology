@@ -1,2 +1,2 @@
 # River_Delineation_and_Typology
-Master thesis in Geomatics 
+Repository for master thesis in Geomatics at TU Delft. The thesis is about the delineation of the urban river space, via first line of buildings, visible space, and floodable area. This research aims to develop a data-driven approach for typology development for the urban river space, based on cross-sectional data within the space. A cross-section is taken as a representation of a river space type, and metrics are computed based on geometric properties of this cross-section, and semantic data, together with the different delineations of the space.  
