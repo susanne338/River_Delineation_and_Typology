@@ -70,7 +70,7 @@ dem_path = clipped_dem_path
 
 # Loop through each point in the shapefile
 for i, feature in enumerate(points_layer.getFeatures()):
-    if i <= 5:
+    if i > 10:
         point_geom = feature.geometry().asPoint()  # Get the point's geometry as a coordinate (x, y)
         height = feature['height']
         print(f"Processing feature ID: {feature.id()} with height: {feature['height']}")
