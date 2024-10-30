@@ -4,8 +4,20 @@ import numpy as np
 from tqdm import tqdm
 
 
-# ADD EMBANKMENT AND VIEPOINT HEIGHT VALUES TO CROSS-SECTIONS-MIDPOINTS FILE
-def extract_max_elevation_values(shapefile, midpoints_file, user_defined_height):
+# ADD EMBANKMENT AND VIEWPOINT HEIGHT VALUES TO CROSS-SECTIONS-MIDPOINTS FILE------------------------------------------
+def extract_max_elevation_values(shapefile, midpoints_file, embankments_file, user_defined_height):
+    """
+    Extracts the elevation values of the embankments, and selects the max value for the viewshed analysis
+    This max value is then added up with user_defined_height.
+    Args:
+        shapefile: parameter shapefile
+        midpoints_file: cross-section midpoint file that is altered
+        user_defined_height: viewpoint height to peform viewshed analysis from
+
+    Returns: saves values left, right (embankment), max, and (viewpoint) height to midpoints_file
+    TODO: if midpoint has elevation value, then take this value? Then we have a bridge or faulty data?
+    TODO: add location
+    """
     parameters = gpd.read_file(shapefile)
     midpoints = gpd.read_file(midpoints_file)
 
@@ -14,6 +26,12 @@ def extract_max_elevation_values(shapefile, midpoints_file, user_defined_height)
     midpoints['right'] = np.nan
     midpoints['max'] = np.nan
     midpoints['height'] = np.nan
+
+    # Initialize embankments points
+    embankment_points = gpd.GeoDataFrame(columns=['left_geom', 'right_geom'])
+    embankment_points['geometry'] = np.nan
+    # embankment_points['right_geom'] = np.nan
+    embankment_points.set_crs("EPSG:28992", inplace=True)  # Example CRS: WGS84
 
     # Group by cross-section ID
     grouped = parameters.groupby('id')
@@ -42,19 +60,24 @@ def extract_max_elevation_values(shapefile, midpoints_file, user_defined_height)
         for i in range(midpoint_idx - 1, -1, -1):
             if not pd.isna(cross_section_points.loc[i, 'elev_dtm']):
                 left_value = cross_section_points.loc[i, 'elev_dtm']
+                left_geom = cross_section_points.loc[i, 'geometry']
+                print(f"left geom is {left_geom} and type {type(left_geom)}")
                 break
 
         # Search right of the midpoint for the first valid elevation value
         for i in range(midpoint_idx + 1, len(cross_section_points)):
             if not pd.isna(cross_section_points.loc[i, 'elev_dtm']):
                 right_value = cross_section_points.loc[i, 'elev_dtm']
+                # right_geom = cross_section_points.loc[i, 'geometry']
                 break
 
         # Assign left, right, max, and height values to the midpoints DataFrame
         midpoints.at[idx, 'left'] = left_value
         midpoints.at[idx, 'right'] = right_value
+        embankment_points.at[idx, 'geometry'] = left_geom
+        # embankment_points.at[idx, 'right_geom'] = right_geom
 
-        # Calculate max and height
+        # Calculate max and height and add to file
         max_value = max(
             filter(None, [left_value, right_value])) if left_value is not None or right_value is not None else None
         midpoints.at[idx, 'max'] = max_value
@@ -62,12 +85,17 @@ def extract_max_elevation_values(shapefile, midpoints_file, user_defined_height)
 
         # Save the result to a new shapefile
     midpoints.to_file(midpoints_file, driver='ESRI Shapefile')
-    print(f"Results saved to {midpoints_file}")
+    embankment_points.to_file(embankments_file, driver="ESRI Shapefile")
+    print(f"Results saved to {midpoints_file} and {embankments_file}")
 
 
-# extract_max_elevation_values('output/parameters/parameters_longest.shp',
-#                              'output/cross_sections/cross_sections_midpoints.shp', 1.75)
-
-gdf = gpd.read_file('output/cross_sections/cross_sections_midpoints.shp')
+extract_max_elevation_values('output/parameters/parameters_longest.shp',
+                             'output/cross_sections/cross_sections_midpoints.shp', 'output/metrics/embankment_points_left.shp', 1.75)
+#
+# # SAVE THE FILE TO CSV TO TAKE A LOOK
+gdf = gpd.read_file('output/metrics/embankment_points_left.shp')
 print("Columns in the shapefile:", gdf.columns.tolist())
-gdf.to_csv("only_to_check.csv", index=False)
+gdf.to_csv("output/metrics/embankment_points_left.csv", index=False)
+
+# gdf = gpd.read_file('output/parameters/parameters_longest.shp')
+# print("Columns in the shapefile:", gdf.columns.tolist())

@@ -63,10 +63,11 @@ def combine_viewsheds(input_dir, output_path):
     print(f"Combined viewshed created at: {output_path}")
 
 # Run function
-input_directory = 'C:/Users/susan/Documents/thesis/Thesis-terminal/thesis_output/visibility'
-output_file = os.path.join(input_directory, 'combined_viewshed.tif')
+input_directory = 'output/visibility/binary'
+directory_vis = 'output/visibility'
+output_file = os.path.join(directory_vis, 'combined_viewshed.tif')
 
-# combine_viewsheds(input_directory, output_file)
+combine_viewsheds(input_directory, output_file)
 
 # DELINEATE VISIBLE AREA------------------------------------------------------------------------------------
 def filter_small_polygons(polygons, min_area):
@@ -177,14 +178,13 @@ def raster_to_polygon(input_raster, output_shapefile, smooth_tolerance=1.0, min_
         print(f"Total area: {smoothed_polygon.area:.2f} square units")
 
 # Run the conversion to delineate visible space
-input_raster = 'C:/Users/susan/Documents/thesis/Thesis-terminal/thesis_output/visibility/combined_viewshed.tif'
-output_dir = 'C:/Users/susan/Documents/thesis/Thesis-terminal/thesis_output/visibility'
-output_shapefile = os.path.join(output_dir, 'viewshed_boundary.shp')
+input_raster = 'output/visibility/combined_viewshed.tif'
+output_shapefile = os.path.join(directory_vis, 'viewshed_boundary.shp')
 
-# 1 gives patchy
+# 1 gives kinda patchy result?
 smooth_tolerance = 1.0
 min_area = 100
-# raster_to_polygon(input_raster, output_shapefile, smooth_tolerance, min_area)
+raster_to_polygon(input_raster, output_shapefile, smooth_tolerance, min_area)
 
 
 
