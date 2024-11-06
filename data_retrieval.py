@@ -36,6 +36,77 @@ import shutil
 from tqdm import tqdm
 
 
+# OSM RIVER-------------------------------------------------------------------------------------------------------------
+def fetch_river_overpass(river_name, output_file):
+    """
+    :param river_name:
+    :param output_file:
+    :return: geodataframe of river eihter as geometry=lines or geometry = polygons AND saves as shapefile
+    """
+    api = overpy.Overpass()
+    # These are all possibilities but I would get multiple rivers if I didn't specify that it was a canal. I need to alter the function so that I can specify more? or even just take some id instead of river name
+    # Overpass query
+    # query = f"""
+    # [out:json];
+    # (
+    #   way["waterway"="river"]["name"="{river_name}"];
+    #   way["waterway"="canal"]["name"="{river_name}"];
+    #   relation["waterway"="river"]["name"="{river_name}"];
+    #   way["water"="river"]["name"="{river_name}"];
+    #   relation["water"="river"]["name"="{river_name}"];
+    #   way["natural"="water"]["name"="{river_name}"];
+    #   relation["natural"="water"]["name"="{river_name}"];
+    # );
+    # out body;
+    # """
+    query = f"""
+        [out:json];
+        (
+          way["waterway"="river"]["name"="{river_name}"];
+        );
+        out body;
+        """
+
+    result = api.query(query)
+
+    lines = []
+    polygons = []
+
+    for way in result.ways:
+        # Resolve missing nodes (fetch missing node data if needed)
+        way.get_nodes(resolve_missing=True)
+        coords = [(float(node.lon), float(node.lat)) for node in way.nodes]
+        lines.append(LineString(coords))
+
+    for rel in result.relations:
+        for member in rel.members:
+            if member.geometry:
+                coords = [(float(geom.lon), float(geom.lat)) for geom in member.geometry]
+                polygons.append(Polygon(coords))
+
+    # Save to shapefile
+    if lines:
+        gdf = gpd.GeoDataFrame(geometry=lines,  crs="EPSG:4326")
+        gdf = gdf.to_crs("EPSG:28992")
+        gdf.to_file(output_file, driver='ESRI Shapefile')
+        print(f"Shapefile saved with line geometries: {output_file}")
+        return gdf
+    elif polygons:
+        gdf = gpd.GeoDataFrame(geometry=polygons,  crs="EPSG:4326")
+        gdf = gdf.to_crs("EPSG:28992")
+        gdf.to_file(output_file, driver='ESRI Shapefile')
+        print(f"Shapefile saved with polygon geometries: {output_file}")
+        return gdf
+    else:
+        print(f"No data found for {river_name}")
+
+
+# Example usage
+fetch_river_overpass("Maas", "input/river/maas.shp")
+
+
+
+
 
 
 # AHN DATA RETRIEVAL----------------------------------------------------------------------------------------------------
@@ -242,9 +313,15 @@ def download_AHN_tile(url, destination_folder, filename):
         print(f"Failed to download: {filename} (Status code: {response.status_code})")
 
 
-def download_AHN_tiles(json_path, bbox, destination_folder):
+def download_AHN_tiles(json_path, river_file, bbox, destination_folder):
     # Load the JSON data
     data = load_json(json_path)
+    gdf_river = gpd.read_file(river_file)
+    river_geometry = gdf_river.geometry.unary_union
+    buffered_area = river_geometry.buffer(100)
+
+    # Get the bounding box for the buffered area
+    minx, miny, maxx, maxy = buffered_area.bounds
 
     # Ensure destination folder exists
     if not os.path.exists(destination_folder):
@@ -257,19 +334,42 @@ def download_AHN_tiles(json_path, bbox, destination_folder):
         tile_name = feature['properties']['name']  # Filename
 
         # Check if the tile intersects with the bounding box
-        if tile_intersects(tile_coords, bbox):
-            print(f"Tile {tile_name} intersects with the bounding box. Downloading...")
+        if tile_intersects(tile_coords, buffered_area):
+
+            file_path = os.path.join(destination_folder, tile_name)
+            if os.path.exists(file_path):
+                print(f"Already downloaded tile {tile_name}")
+                continue
+
+            print(f"Tile {tile_name} intersects with the buffer. Downloading...")
             # Download the tile
             download_AHN_tile(tile_url, destination_folder, tile_name)
         else:
             print(f"Tile {tile_name} does not intersect with the bounding box.")
 
 
-json_path = 'thesis_output/needed_files/kaartbladindex_AHN_DTM.json'
-gdf = gpd.read_file('thesis_output/cross_sections/cross_sections_longest.shp')
-bbox = gdf.total_bounds
-destination_folder = 'thesis_output/AHN_tiles_DTM'
-download_AHN_tiles(json_path, bbox, destination_folder)
+# river='input/river/maas.shp'
+# json_path = 'thesis_output/needed_files/kaartbladindex_AHN_DTM.json'
+# gdf = gpd.read_file('output/cross_sections/maas/cross_sections.shp')
+# bbox = gdf.total_bounds
+# destination_folder = 'input/AHN/Maas/DTM'
+# download_AHN_tiles(json_path,river, bbox, destination_folder)
+import geopandas as gpd
+
+# CHECKING MAAS. THERE ARE 66 LINES
+# gdf = gpd.read_file("input/river/maas.shp")
+# # Check if the geometries are LineString or MultiLineString
+# # If you have MultiLineString, we will split them into individual LineStrings
+# all_lines = []
+# for geom in gdf.geometry:
+#     if geom.geom_type == 'MultiLineString':
+#         all_lines.extend(list(geom.geoms))  # Split into individual LineStrings
+#     elif geom.geom_type == 'LineString':
+#         all_lines.append(geom)  # Add LineString directly
+# # Calculate and print lengths
+# for i, line in enumerate(all_lines):
+#     length = line.length
+#     print(f"Line {i + 1}: Length = {length}")
 
 # MERGE tif files DOESNT WORK
 def merge_tiles(combined_tiles, folder_of_tiles):
@@ -317,78 +417,6 @@ def merge_tiles(combined_tiles, folder_of_tiles):
 
 
 
-# OSM RIVER-------------------------------------------------------------------------------------------------------------
-def fetch_river_overpass(river_name, output_file):
-    """
-    :param river_name:
-    :param output_file:
-    :return: geodataframe of river eihter as geometry=lines or geometry = polygons AND saves as shapefile
-    """
-    api = overpy.Overpass()
-    # These are all possibilities but I would get multiple rivers if I didn't specify that it was a canal. I need to alter the function so that I can specify more? or even just take some id instead of river name
-    # Overpass query
-    # query = f"""
-    # [out:json];
-    # (
-    #   way["waterway"="river"]["name"="{river_name}"];
-    #   way["waterway"="canal"]["name"="{river_name}"];
-    #   relation["waterway"="river"]["name"="{river_name}"];
-    #   way["water"="river"]["name"="{river_name}"];
-    #   relation["water"="river"]["name"="{river_name}"];
-    #   way["natural"="water"]["name"="{river_name}"];
-    #   relation["natural"="water"]["name"="{river_name}"];
-    # );
-    # out body;
-    # """
-    query = f"""
-        [out:json];
-        (
-          way["waterway"="canal"]["name"="{river_name}"];
-        );
-        out body;
-        """
-
-    result = api.query(query)
-
-    lines = []
-    polygons = []
-
-    for way in result.ways:
-        # Resolve missing nodes (fetch missing node data if needed)
-        way.get_nodes(resolve_missing=True)
-        coords = [(float(node.lon), float(node.lat)) for node in way.nodes]
-        lines.append(LineString(coords))
-
-    for rel in result.relations:
-        for member in rel.members:
-            if member.geometry:
-                coords = [(float(geom.lon), float(geom.lat)) for geom in member.geometry]
-                polygons.append(Polygon(coords))
-
-    # Save to shapefile
-    if lines:
-        gdf = gpd.GeoDataFrame(geometry=lines,  crs="EPSG:4326")
-        gdf = gdf.to_crs("EPSG:28992")
-        gdf.to_file(output_file, driver='ESRI Shapefile')
-        print(f"Shapefile saved with line geometries: {output_file}")
-        return gdf
-    elif polygons:
-        gdf = gpd.GeoDataFrame(geometry=polygons,  crs="EPSG:4326")
-        gdf = gdf.to_crs("EPSG:28992")
-        gdf.to_file(output_file, driver='ESRI Shapefile')
-        print(f"Shapefile saved with polygon geometries: {output_file}")
-        return gdf
-    else:
-        print(f"No data found for {river_name}")
-
-
-# Example usage
-# fetch_river_overpass("Kanaal door Walcheren", "river_shapefile/KanaalDoorWalcheren.shp")
-
-
-
-
-
 # 3DBAG-----------------------------------------------------------------------------------------------------------------
 def fetch_3DBAG_tiles(fgb_path, buffer, river_gdf, output_folder, target_crs='EPSG:28992'):
     river_geometry = river_gdf.geometry.unary_union
@@ -407,12 +435,14 @@ def fetch_3DBAG_tiles(fgb_path, buffer, river_gdf, output_folder, target_crs='EP
     # tile_index.info()
 
     # Check which tiles intersect with the bounding box
-    intersecting_tiles = tile_index[tile_index.geometry.intersects(bounding_box)]
+    # intersecting_tiles = tile_index[tile_index.geometry.intersects(bounding_box)]
+    intersecting_tiles = tile_index[tile_index.geometry.intersects(buffered_area)]
     num_items = len(intersecting_tiles)
     print(f'Number of intersecting tiles: {num_items}')
     # Download each intersecting tile
     iteration = 0
     for index, row in intersecting_tiles.iterrows():
+
         tile_id = row['tile_id']
         gpkg_download = row['gpkg_download']  # this is the download link
         tile_id = tile_id.replace('/', '-')
@@ -519,6 +549,15 @@ def fetch_3DBAG_tiles(fgb_path, buffer, river_gdf, output_folder, target_crs='EP
 
 
 def combine_geotiles(input_folder, output_file):
+    """
+    Combines the seperate tif files into one file
+    Args:
+        input_folder: Folder of tif files
+        output_file: Path to output tif file. Specify if it is DTM or DSM in the filename!
+
+    Returns:
+    TODO: make it so it deletes the seperate tiles, actually just the whole folder
+    """
     # Get all .gpkg files in the input folder
     gpkg_files = [f for f in os.listdir(input_folder) if f.endswith('.gpkg')]
 
@@ -571,11 +610,11 @@ def combine_geotiles(input_folder, output_file):
 wfs_url = 'https://data.3dbag.nl/api/BAG3D/wfs?request=getcapabilities'
 buffer = 100  # Area around river so that there is some extra space for sure taken into account
 tile_index_path = 'thesis_output/needed_files/tile_index.fgb' #fgb file from 3DBAG with dimensions of tiles
-tiles_folder = 'thesis_output/3DBAG_tiles' #output folder for my retrieved tiles
-# gdf_river = gpd.read_file('thesis_output/river_shapefiles/longest_river.shp') #shapefile of my river in NL
-output_file = 'thesis_output//3DBAG_combined_tiles/combined_3DBAG_tiles.gpkg' #File to write all tiles combined to
+tiles_folder = 'input/3DBAG/maas/tiles' #output folder for my retrieved tiles
+gdf_river = gpd.read_file('input/river/maas.shp') #shapefile of my river in NL
+output_file = 'input/3DBAG/maas/combined_3DBAG_tiles_DTM.gpkg' #File to write all tiles combined to
 
 # EXECUTE SCRIPT TO GET ALL TILES
-# fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
-# combine_geotiles(tiles_folder, output_file)
+fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
+combine_geotiles(tiles_folder, output_file)
 

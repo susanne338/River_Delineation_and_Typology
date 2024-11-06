@@ -65,7 +65,7 @@ else:
 # print(f"Clipped DEM saved to {clipped_dem_path}")
 # ----------------------------------------------------------------------------------------------------------------------
 
-clipped_dem_path = 'C:/Users/susan/Documents/thesis/Thesis-terminal/input/AHN/DSM/clipped_dsm.tif'
+clipped_dem_path = '/input/AHN/KanaalVanWalcheren/DSM/clipped_dsm.tif'
 dem_path = clipped_dem_path
 
 # Loop through each point in the shapefile
