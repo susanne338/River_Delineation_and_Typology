@@ -186,14 +186,24 @@ def floodable_points(flood_tif, output_file):
 
                 # Only process pixels that are not nodata (-9999)
                 if elevation != -9999 and elevation != 0:
+
                     # Get the geographic coordinates of the pixel center
-                    x, y = affine * (col + 0.5, row + 0.5)
+                    # x, y = affine * (col + 0.5, row + 0.5)
 
-                    # Create a Point geometry with the x, y coordinates and the elevation
-                    point = Point(x, y)
+                    # Get coordinates of each pixels corners
+                    top_left = affine * (col, row)
+                    top_right = affine * (col + 1, row)
+                    bottom_left = affine * (col, row + 1)
+                    bottom_right = affine * (col + 1, row + 1)
 
-                    # Add the point with its elevation to the list
-                    values.append({'geometry': point, 'elevation': elevation})
+                    # # Create a Point geometry with the x, y coordinates and the elevation
+                    # point = Point(x, y)
+                    # # Add the point with its elevation to the list
+                    # values.append({'geometry': point, 'elevation': elevation})
+                    values.append({'geometry': Point(top_left), 'elevation': elevation})
+                    values.append({'geometry': Point(top_right), 'elevation': elevation})
+                    values.append({'geometry': Point(bottom_left), 'elevation': elevation})
+                    values.append({'geometry': Point(bottom_right), 'elevation': elevation})
 
     gdf = gpd.GeoDataFrame(values, crs=src.crs)
     gdf = gdf.set_crs("EPSG:28992", allow_override=True)
@@ -203,7 +213,7 @@ def floodable_points(flood_tif, output_file):
     return
 
 
-# floodable_points(tif_file, 'output/flood/floodable_points.shp')
+floodable_points(tif_file, 'output/flood/floodable_points_corners.shp')
 
 def alpha_shape(points_file, output_file, alpha):
     """
@@ -274,4 +284,4 @@ def alpha_shape(points_file, output_file, alpha):
         print(f"Is the geometry valid? {alpha_shape.is_valid}")
 
 
-alpha_shape("output/flood/floodable_points.shp", "output/flood/alpha_shape.shp", 1200)
+alpha_shape("output/flood/floodable_points_corners.shp", "output/flood/alpha_shape_corners.shp", 1200)
