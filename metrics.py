@@ -30,9 +30,11 @@ def extract_max_elevation_values(shapefile, midpoints_file, embankments_file_lef
     # Initialize embankments points
     embankment_points_left = gpd.GeoDataFrame(columns=[])
     embankment_points_left['geometry'] = np.nan
+    embankment_points_left['h_distance'] = np.nan
     embankment_points_left.set_crs("EPSG:28992", inplace=True)
     embankment_points_right = gpd.GeoDataFrame(columns=[])
     embankment_points_right['geometry'] = np.nan
+    embankment_points_right['h_distance'] = np.nan
     embankment_points_right.set_crs("EPSG:28992", inplace=True)
 
     # Group by cross-section ID
@@ -63,6 +65,7 @@ def extract_max_elevation_values(shapefile, midpoints_file, embankments_file_lef
             if not pd.isna(cross_section_points.loc[i, 'elev_dtm']):
                 left_value = cross_section_points.loc[i, 'elev_dtm']
                 left_geom = cross_section_points.loc[i, 'geometry']
+                left_hdist = cross_section_points.loc[i, 'h_distance']
                 print(f"left geom is {left_geom} and type {type(left_geom)}")
                 break
 
@@ -71,6 +74,7 @@ def extract_max_elevation_values(shapefile, midpoints_file, embankments_file_lef
             if not pd.isna(cross_section_points.loc[i, 'elev_dtm']):
                 right_value = cross_section_points.loc[i, 'elev_dtm']
                 right_geom = cross_section_points.loc[i, 'geometry']
+                right_hdist = cross_section_points.loc[i, 'h_distance']
                 break
 
         # Assign left, right, max, and height values to the midpoints DataFrame
@@ -78,6 +82,8 @@ def extract_max_elevation_values(shapefile, midpoints_file, embankments_file_lef
         midpoints.at[idx, 'right'] = right_value
         embankment_points_left.at[idx, 'geometry'] = left_geom
         embankment_points_right.at[idx, 'geometry'] = right_geom
+        embankment_points_left.at[idx, 'h_distance'] = left_hdist
+        embankment_points_right.at[idx, 'h_distance'] = right_hdist
         # embankment_points.at[idx, 'right_geom'] = right_geom
 
         # Calculate max and height and add to file
