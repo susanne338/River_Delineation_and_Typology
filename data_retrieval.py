@@ -297,6 +297,7 @@ def load_json(json_path):
 
 def tile_intersects(tile_coords, bbox):
     tile_polygon = Polygon(tile_coords)
+    print(f"tile polygon {tile_polygon}")
     bbox_polygon = box(*bbox)  # Create a Polygon for the bounding box
     return tile_polygon.intersects(bbox_polygon)
 
@@ -313,7 +314,7 @@ def download_AHN_tile(url, destination_folder, filename):
         print(f"Failed to download: {filename} (Status code: {response.status_code})")
 
 
-def download_AHN_tiles(json_path, river_file, bbox, destination_folder):
+def download_AHN_tiles(json_path, river_file, destination_folder):
     # Load the JSON data
     data = load_json(json_path)
     gdf_river = gpd.read_file(river_file)
@@ -334,7 +335,7 @@ def download_AHN_tiles(json_path, river_file, bbox, destination_folder):
         tile_name = feature['properties']['name']  # Filename
 
         # Check if the tile intersects with the bounding box
-        if tile_intersects(tile_coords, buffered_area):
+        if tile_intersects(tile_coords, buffered_area.bounds):
 
             file_path = os.path.join(destination_folder, tile_name)
             if os.path.exists(file_path):
@@ -348,12 +349,11 @@ def download_AHN_tiles(json_path, river_file, bbox, destination_folder):
             print(f"Tile {tile_name} does not intersect with the bounding box.")
 
 
-# river='input/river/maas.shp'
-# json_path = 'thesis_output/needed_files/kaartbladindex_AHN_DTM.json'
-# gdf = gpd.read_file('output/cross_sections/maas/cross_sections.shp')
-# bbox = gdf.total_bounds
-# destination_folder = 'input/AHN/Maas/DTM'
-# download_AHN_tiles(json_path,river, bbox, destination_folder)
+river='input/river/longest_river.shp'
+json_path = 'input/AHN/kaartbladindex_AHN_DSM.json'
+destination_folder = 'input/AHN/KanaalVanWalcheren/DSM_test'
+download_AHN_tiles(json_path,river, destination_folder)
+
 import geopandas as gpd
 
 # CHECKING MAAS. THERE ARE 66 LINES
@@ -615,6 +615,6 @@ gdf_river = gpd.read_file('input/river/maas.shp') #shapefile of my river in NL
 output_file = 'input/3DBAG/maas/combined_3DBAG_tiles_DTM.gpkg' #File to write all tiles combined to
 
 # EXECUTE SCRIPT TO GET ALL TILES
-fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
-combine_geotiles(tiles_folder, output_file)
+# fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
+# combine_geotiles(tiles_folder, output_file)
 
