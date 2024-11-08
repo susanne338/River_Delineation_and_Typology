@@ -6,15 +6,17 @@ Change output path as needed.
 Potential problems occuring when running script:
 When I run it for a small batch first to test, then running it again afterwards makes it not work. Probably problem with temporary files in QGIS.
 A solution to this is to open a new project in QGIS and run it from there
+TODO: make it so it deletes the tif files non-binary
 """
 
 import processing
 import os
 from glob import glob
+import geopandas as gpd
 
 # Load the point shapefile into QGIS (make sure the path is correct)
 points_layer = QgsVectorLayer(
-    'C:/Users/susan/Documents/thesis/Thesis-terminal/output/cross_sections/cross_sections_midpoints.shp', 'points',
+    'C:/Users/susan/Documents/thesis/Thesis-terminal/output/river/KanaalVanWalcheren/KanaalVanWalcheren_mid.shp', 'points',
     'ogr')
 if not points_layer.isValid():
     print("Layer failed to load!")
@@ -65,12 +67,14 @@ else:
 # print(f"Clipped DEM saved to {clipped_dem_path}")
 # ----------------------------------------------------------------------------------------------------------------------
 
-clipped_dem_path = '/input/AHN/KanaalVanWalcheren/DSM/clipped_dsm.tif'
+clipped_dem_path = 'C:/Users/susan/Documents/thesis/Thesis-terminal/input/AHN/KanaalVanWalcheren/DSM_test/merged_clipped.tif'
 dem_path = clipped_dem_path
 
 # Loop through each point in the shapefile
 for i, feature in enumerate(points_layer.getFeatures()):
-    if i > 10:
+    if i <1:
+        river_width = feature['width']
+        max_distance = 100 + 0.5 * river_width
         point_geom = feature.geometry().asPoint()  # Get the point's geometry as a coordinate (x, y)
         height = feature['height']
         print(f"Processing feature ID: {feature.id()} with height: {feature['height']}")
@@ -80,10 +84,10 @@ for i, feature in enumerate(points_layer.getFeatures()):
         params = {
             'input': dem_path,  # The DEM raster
             'coordinates': f'{point_geom.x()},{point_geom.y()}',  # Observer coordinates (point)
-            'max_distance': 100,  # Maximum visibility distance
+            'max_distance': max_distance,  # Maximum visibility distance
             'observer_elevation': f'{height}',  # Observer height (adjust as needed)
             'target_elevation': 0,  # Target height (adjust if needed)
-            'output': f'C:/Users/susan/Documents/thesis/Thesis-terminal/output/visibility/viewsheds/viewshed_{point_id}.tif',
+            'output': f'C:/Users/susan/Documents/thesis/Thesis-terminal/output/visibility/KanaalVanWalcheren/viewsheds/viewshed_{point_id}.tif',
             # Output file path for each point
             '-b': True
         }
@@ -98,7 +102,7 @@ for i, feature in enumerate(points_layer.getFeatures()):
         # Binary
         print(params.keys())
         viewshed_output_path = params['output']
-        binary_output_path = f'C:/Users/susan/Documents/thesis/Thesis-terminal/output/visibility/binary/binary_viewshed_{point_id}.tif'
+        binary_output_path = f'C:/Users/susan/Documents/thesis/Thesis-terminal/output/visibility/KanaalVanWalcheren/binary/binary_viewshed_{point_id}.tif'
 
         # Reclassify to create binary output
         reclass_params = {
