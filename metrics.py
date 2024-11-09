@@ -1,120 +1,15 @@
+"""
+
+"""
+
 import geopandas as gpd
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from shapely.geometry import Point, LineString, Polygon
 
-# ADD EMBANKMENT AND VIEWPOINT HEIGHT VALUES TO CROSS-SECTIONS-MIDPOINTS FILE------------------------------------------
-def extract_max_elevation_values(shapefile, midpoints_file, embankments_file_left, embankments_file_right, user_defined_height):
-    """
-    Extracts the elevation values of the embankments, and selects the max value for the viewshed analysis
-    This max value is then added up with user_defined_height.
-    Args:
-        shapefile: parameter shapefile
-        midpoints_file: cross-section midpoint file that is altered
-        user_defined_height: viewpoint height to peform viewshed analysis from
-
-    Returns: saves values left, right (embankment), max, and (viewpoint) height to midpoints_file
-    TODO: add location. what does this mean.
-    TODO: now when the river extend my buffer, no boundary point gets added. Fix to edge of buffer, or last point
-    """
-    parameters = gpd.read_file(shapefile)
-    midpoints = gpd.read_file(midpoints_file)
-
-    # Initialize new columns in midpoints for output
-    midpoints['left'] = np.nan
-    midpoints['right'] = np.nan
-    midpoints['max'] = np.nan
-    midpoints['height'] = np.nan
-
-    # Initialize embankments points
-    embankment_points_left = gpd.GeoDataFrame(columns=[])
-    embankment_points_left['geometry'] = np.nan
-    embankment_points_left['h_distance'] = np.nan
-    embankment_points_left.set_crs("EPSG:28992", inplace=True)
-    embankment_points_right = gpd.GeoDataFrame(columns=[])
-    embankment_points_right['geometry'] = np.nan
-    embankment_points_right['h_distance'] = np.nan
-    embankment_points_right.set_crs("EPSG:28992", inplace=True)
-
-    # Group by cross-section ID
-    grouped = parameters.groupby('id')
-    for idx, row in tqdm(midpoints.iterrows(), total=midpoints.shape[0], desc="Processing midpoints"):
-        midpoint_geom = row.geometry
-        cross_section_id = row['FID']
-
-        # Select corresponding cross-section points from 'parameters' shapefile
-        cross_section_points = grouped.get_group(cross_section_id)
-
-        # Ensure points are sorted by h_distance
-        cross_section_points = cross_section_points.sort_values('h_distance').reset_index(drop=True)
-
-        # Calculate approximate midpoint in h_distance
-        max_h_distance = cross_section_points['h_distance'].max()
-        target_midpoint = max_h_distance / 2
-
-        # Find the closest point to this target midpoint
-        midpoint_idx = (cross_section_points['h_distance'] - target_midpoint).abs().idxmin()
-
-        # Initialize left and right values
-        left_value = None
-        right_value = None
-
-        # Search left of the midpoint for the first valid elevation value
-        for i in range(midpoint_idx - 1, -1, -1):
-            if not pd.isna(cross_section_points.loc[i, 'elev_dtm']):
-                left_value = cross_section_points.loc[i, 'elev_dtm']
-                left_geom = cross_section_points.loc[i, 'geometry']
-                left_hdist = cross_section_points.loc[i, 'h_distance']
-                print(f"left geom is {left_geom} and type {type(left_geom)}")
-                break
-
-        # Search right of the midpoint for the first valid elevation value
-        for i in range(midpoint_idx + 1, len(cross_section_points)):
-            if not pd.isna(cross_section_points.loc[i, 'elev_dtm']):
-                right_value = cross_section_points.loc[i, 'elev_dtm']
-                right_geom = cross_section_points.loc[i, 'geometry']
-                right_hdist = cross_section_points.loc[i, 'h_distance']
-                break
-
-        # Assign left, right, max, and height values to the midpoints DataFrame
-        midpoints.at[idx, 'left'] = left_value
-        midpoints.at[idx, 'right'] = right_value
-        embankment_points_left.at[idx, 'geometry'] = left_geom
-        embankment_points_right.at[idx, 'geometry'] = right_geom
-        embankment_points_left.at[idx, 'h_distance'] = left_hdist
-        embankment_points_right.at[idx, 'h_distance'] = right_hdist
-        # embankment_points.at[idx, 'right_geom'] = right_geom
-
-        # Calculate max and height and add to file
-        max_value = max(
-            filter(None, [left_value, right_value])) if left_value is not None or right_value is not None else None
-        midpoints.at[idx, 'max'] = max_value
-        midpoints.at[idx, 'height'] = max_value + user_defined_height if max_value is not None else None
-
-        # Save the result to a new shapefile
-    midpoints.to_file(midpoints_file, driver='ESRI Shapefile')
-    embankment_points_left.to_file(embankments_file_left, driver="ESRI Shapefile")
-    print(f"Results saved to {midpoints_file} and {embankments_file_left}")
-    embankment_points_right.to_file(embankments_file_right, driver="ESRI Shapefile")
-    print(f"Results saved to {midpoints_file} and {embankments_file_right}")
-
-
-# extract_max_elevation_values('output/parameters/parameters_longest.shp',
-#                              'output/cross_sections/cross_sections_midpoints.shp', 'output/metrics/embankment_points_left.shp', 'output/metrics/embankment_points_right.shp', 1.75)
-
-# # SAVE THE FILE TO CSV TO TAKE A LOOK
-# gdf = gpd.read_file('output/metrics/embankment_points_left.shp')
-# print("Columns in the shapefile:", gdf.columns.tolist())
-# gdf.to_csv("output/metrics/cross_section_midpoints_embankment.csv", index=False)
-# gdf = gdf.drop(columns=['left_geom', 'right_geom'])
-# print("Columns in the shapefile:", gdf.columns.tolist())
-# gdf = gpd.read_file('output/metrics/embankment_points_right.shp')
-# gdf = gdf.drop(columns=['left_geom', 'right_geom'])
-# print("Columns in the shapefile:", gdf.columns.tolist())
-# gdf = gpd.read_file('output/parameters/parameters_longest.shp')
-# print("Columns in the shapefile:", gdf.columns.tolist())
-
+# This gets the polygon of the river via the embankment points computed before
+# TODO: add embankment points at buffer or add that into this function cause now it skips
 def polygon_river(embankment_left, embankment_right, river_polygon_shapefile):
     gdf_right = gpd.read_file(embankment_right)
     gdf_left = gpd.read_file(embankment_left)
@@ -135,5 +30,148 @@ def polygon_river(embankment_left, embankment_right, river_polygon_shapefile):
     gdf_polygon.set_crs(gdf_right.crs, allow_override=True, inplace=True)
     gdf_polygon.to_file(river_polygon_shapefile)
     return
+# polygon_river('output/metrics/embankment_points_left.shp', 'output/metrics/embankment_points_right.shp', 'output/metrics/river_polygon.shp')
 
-polygon_river('output/metrics/embankment_points_left.shp', 'output/metrics/embankment_points_right.shp', 'output/metrics/river_polygon.shp')
+# METRIC VALUE COMPUTATION-------------------------------------------------------------------------
+# Midpoints shp contains columns FID, left, right, max, height, width, geometry
+midpoints_shp = "output/river/KanaalVanWalcheren/KanaalVanWalcheren_mid.shp"
+
+def compute_ratio_flood(group, column):
+    total_points = len(group)
+    floodable = len(group[(group[column] != -9999) & (group[column].notna())])
+    print(f"total points is {total_points} and floodable pts is  {floodable}")
+    return floodable / total_points if total_points > 0 else 0.0
+
+def compute_stats_flood(group, column):
+    points_with_valid_depth = group[group[column] != -9999]
+    depths = points_with_valid_depth[column]
+    return(depths.mean(), depths.max(), depths.std())
+
+
+def compute_landuse_ratios(section_points, unique_landuses):
+    total_points = len(section_points)
+    landuse_counts = {lu: 0 for lu in unique_landuses['landuse']}
+
+    # Count occurrences of each landuse
+    for landuses in section_points['landuse'].dropna():
+        individual_landuses = [lu.strip() for lu in str(landuses).split(',')]
+        for lu in individual_landuses:
+            if lu in landuse_counts:
+                landuse_counts[lu] += 1
+
+    # Convert counts to ratios
+    landuse_ratios = {f'landuse_{unique_landuses.loc[unique_landuses["landuse"] == lu, "index"].iloc[0]}':
+                          count / total_points for lu, count in landuse_counts.items()}
+
+    return landuse_ratios
+
+
+def analyze_landuse_distribution(points_shp, unique_landuses_csv, metric_shp):
+    parameters = gpd.read_file(points_shp)
+    unique_landuses = pd.read_csv(unique_landuses_csv)
+
+    # Group points by section ID
+    grouped = parameters.groupby('id')
+
+    # Initialize columns for metrics GeoDataFrame
+    landuse_columns = [f'landuse_{idx}' for idx in range(len(unique_landuses))]
+    columns = ['id', 'geometry'] + landuse_columns
+
+    # Create metrics GeoDataFrame
+    metrics = gpd.GeoDataFrame(columns=columns, crs=parameters.crs)
+
+    # Process each section
+    for idx, section in tqdm(grouped, desc="Processing sections"):
+        # Get section ID and representative geometry
+        id = section.iloc[0]['id']
+        geometry = section.iloc[0]['geometry']
+
+        # Compute landuse ratios
+        landuse_ratios = compute_landuse_ratios(section, unique_landuses)
+
+        # Create row data
+        row_data = {'id': id, 'geometry': geometry}
+        row_data.update(landuse_ratios)
+
+        # Add row to metrics GeoDataFrame
+        metrics.loc[idx] = row_data
+
+    # Save to shapefile
+    metrics.to_file(metric_shp, driver='ESRI Shapefile')
+    return metrics
+
+def compute_values(points_shp, metric_shp, midpoints_shp, unique_landuse_csv):
+    parameters = gpd.read_file(points_shp)
+    unique_landuses = gpd.read_file(unique_landuse_csv)
+    # unique_landuses = extract_unique_landuses(points_shp, unique_landuse_csv)
+
+    cs_shp = gpd.read_file(midpoints_shp)
+    # columns: Index(['id', 'h_distance', 'elev_dtm', 'elev_dsm', 'flood_dept', 'landuse',
+    #        'imperv', 'visible', 'geometry'],
+    #       dtype='object')
+    grouped = parameters.groupby('id')
+    landuse_columns = [f'landuse_{idx}' for idx in range(len(unique_landuses))]
+    base_columns = ['id', 'geometry', 'slope', 'barriers', 'rugosity', 'building',
+                    'tree', 'landuse', 'land_div', 'imperv', 'flood_rat', 'flood_mean',
+                    'flood_max', 'flood_std', 'buil_heig', 'rs_wid', 'visible', 'vis_layer']
+
+    metrics = gpd.GeoDataFrame(
+        columns=base_columns + landuse_columns,
+        crs=parameters.crs
+    )
+
+    for idx, section in tqdm(grouped, desc="Processing sections"):
+        print(f"idx is {idx}")
+
+        id = section.iloc[0]['id']
+        metrics.at[idx, 'id'] = id
+
+        #TODO: Get riverwidth, embankmentpoints, etc from midpoints
+
+        #flood metrics
+        flood_ratio = compute_ratio_flood(section, 'flood_dept')
+        flood_mean, flood_max, flood_std = compute_stats_flood(section, 'flood_dept')
+        print(f"flood stats: {flood_max}, {flood_std}, {flood_mean}")
+        print(f"flood ratio {flood_ratio}")
+        #landuse metrics
+        landuse_ratios = compute_landuse_ratios(section, unique_landuses)
+
+
+        # This should update the metrics geodataframe
+        # TODO: for some reason this doesnt work right now
+        row_data = {
+             'id': id,
+            'geometry': None,
+            'slope': None,
+            'barriers': None,
+            'rugosity': None,
+            'building': None,
+            'tree': None,
+            'landuse': None,
+            'land_div': None,
+            'imperv': None,
+            'flood_rat': flood_ratio,
+            'flood_mean': flood_mean,
+            'flood_max': flood_max,
+            'flood_std': flood_std,
+            'buil_heig': None,
+            'rs_wid': None,
+            'visible': None,
+            'vis_layer': None
+        }
+        row_data.update(landuse_ratios)
+        # metrics.loc[idx] = row_data
+        metrics.loc[idx, row_data.keys()] = list(row_data.values())
+
+    metrics.to_file(metric_shp, driver='ESRI Shapefile')
+
+# compute_values(points_shp="output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_test.shp", metric_shp="metric_test.shp", midpoints_shp=midpoints_shp, unique_landuse_csv='output/parameters/unique_landuses.csv')
+
+
+
+points ="output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_test.shp"
+pts = gpd.read_file(points)
+print(pts['flood_dept'].head(10))
+metr = gpd.read_file("metric_test.shp")
+print(metr[['flood_rat', 'flood_mean', 'flood_max', 'flood_std']].head(1))
+metr.to_csv("metric_test.csv", index=False)
