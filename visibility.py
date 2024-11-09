@@ -17,18 +17,72 @@ from rasterio import features
 from shapely.geometry import shape, Polygon, MultiPolygon, Point
 from shapely.ops import unary_union
 import geopandas as gpd
-from shapely import wkt #Creates geometries from the Well-Known Text (WKT) representation.
+from tqdm import tqdm
+from rasterio.windows import Window
+from collections import Counter
+
+
+#Creates geometries from the Well-Known Text (WKT) representation.
 
 # VIEWSHED BATCH
 # First run the visibility_batch_qgis.py script in the python console within QGIS. This gives all binary viewsheds for the river from the midpoints.
 
 # COMBINE VIEWSHEDS INTO ONE TIF----------------------------------------------------------------------------
+def get_reference_dimensions(viewshed_files):
+    """
+    Get the most common dimensions from all viewshed files
+    """
+    dimensions = []
+    for file in viewshed_files:
+        with rasterio.open(file) as src:
+            dimensions.append((src.height, src.width))
+
+    # Get most common dimensions
+    common_dims = Counter(dimensions).most_common(1)[0][0]
+    print(f"Reference dimensions (height, width): {common_dims}")
+
+    # Also return a list of files that don't match these dimensions
+    files_to_crop = [(f, dim) for f, dim in zip(viewshed_files, dimensions) if dim != common_dims]
+    if files_to_crop:
+        print(f"\nFound {len(files_to_crop)} files that need cropping:")
+        for f, dim in files_to_crop:
+            print(f"- {os.path.basename(f)}: {dim}")
+
+    return common_dims, files_to_crop
+
+
+def crop_to_reference(src, ref_height, ref_width, ref_bounds):
+    """
+    Crop a larger raster to match reference dimensions, aligning with reference bounds
+    """
+    # Get the coordinates of the reference center
+    ref_center_x = (ref_bounds.left + ref_bounds.right) / 2
+    ref_center_y = (ref_bounds.top + ref_bounds.bottom) / 2
+
+    # Convert reference center to pixel coordinates in the larger raster
+    center_px_x, center_px_y = src.index(ref_center_x, ref_center_y)
+
+    # Calculate the start positions to align with reference center
+    start_y = int(center_px_y - ref_height // 2)
+    start_x = int(center_px_x - ref_width // 2)
+
+    # Ensure we don't go out of bounds
+    start_y = max(0, min(start_y, src.height - ref_height))
+    start_x = max(0, min(start_x, src.width - ref_width))
+
+    # Read the cropped portion
+    window = Window(start_x, start_y, ref_width, ref_height)
+    data = src.read(1, window=window)
+
+    return data
+
+
 def combine_viewsheds(input_dir, output_path):
     """
         Combine multiple viewshed rasters using rasterio by taking the max value at each pixel.
         """
     # Get all binary viewshed files
-    viewshed_files = glob.glob(os.path.join(input_dir, 'binary_viewshed_*.tif'))
+    viewshed_files = glob.glob(os.path.join(input_dir, 'viewshed_*.tif'))
 
     if not viewshed_files:
         print("No viewshed files found! :(")
@@ -36,35 +90,95 @@ def combine_viewsheds(input_dir, output_path):
 
     print(f"Found {len(viewshed_files)} viewshed files")
 
-    # Read first file to get metadata height width
-    with rasterio.open(viewshed_files[0]) as src:
-        profile = src.profile.copy()
-        combined = np.zeros((src.height, src.width), dtype=np.uint8)
+    (ref_height, ref_width), files_to_crop = get_reference_dimensions(viewshed_files)
+    files_to_crop = dict(files_to_crop)
 
-    # Process each viewshed
-    for file in viewshed_files:
-        print(f"Processing {os.path.basename(file)}! :)")
-        with rasterio.open(file) as src:
-            data = src.read(1)  # Read the first band
-            combined = np.maximum(combined, data) #max between 0 and 1s
+    # Get reference bounds from a file with correct dimensions
+    ref_file = next(f for f in viewshed_files if f not in files_to_crop)
+
+    with rasterio.open(ref_file) as src:
+        ref_bounds = src.bounds
+        ref_profile = src.profile.copy()
+
+    # Initialize result array
+    result = None
+
+    # Initialize counters for statistics
+    processed_files = 0
+    cropped_files = 0
+    error_files = 0
+
+    for file in tqdm(viewshed_files, desc="Merging viewsheds", unit="file"):
+        try:
+            with rasterio.open(file) as src:
+                # Check if file needs cropping
+                if file in files_to_crop:
+                    print(f"\nCropping {os.path.basename(file)}")
+                    print(f"Original shape: {files_to_crop[file]}")
+                    data = crop_to_reference(src, ref_height, ref_width, ref_bounds)
+                    print(f"Cropped to: {data.shape}")
+                    cropped_files += 1
+                else:
+                    data = src.read(1)
+
+                # Verify dimensions
+                if data.shape != (ref_height, ref_width):
+                    print(f"\nError: Shape mismatch after processing {os.path.basename(file)}")
+                    print(f"Expected shape: ({ref_height}, {ref_width}), got: {data.shape}")
+                    error_files += 1
+                    continue
+
+                # Convert to binary
+                binary_data = (data > 0).astype(np.uint8)
+
+                # Initialize or update result
+                if result is None:
+                    result = binary_data
+                else:
+                    result = np.logical_or(result, binary_data).astype(np.uint8)
+
+                processed_files += 1
+
+        except Exception as e:
+            print(f"\nError processing {file}: {str(e)}")
+            error_files += 1
+            continue
+
+    if result is None:
+        print("No valid data to merge!")
+        return
 
     # Update metadata profile for output
-    profile.update(
+    ref_profile.update(
         dtype=rasterio.uint8, #datatype in raster uint8 = integers from 0-255
         count=1, #number of bands in raster
         nodata=None  # Remove nodata value since we're using binary data
     #     Keep other profile information: width, height, crs, transform
     )
 
-    # Write output to file
-    with rasterio.open(output_path, 'w', **profile) as dst:
-        dst.write(combined, 1)
+    print("\nWriting merged viewshed to file...")
+    with rasterio.open(output_path, 'w', **ref_profile) as dst:
+        dst.write(result, 1)
 
-    print(f"Combined viewshed created at: {output_path}")
+    # Print final statistics
+    print(f"\nMerged viewshed created at: {output_path}")
+    print(f"Successfully processed: {processed_files}")
+    print(f"Files cropped: {cropped_files}")
+    print(f"Errors: {error_files}")
+
+    # Calculate visibility statistics
+    visible_pixels = np.sum(result == 1)
+    total_pixels = result.size
+    visibility_percentage = (visible_pixels / total_pixels) * 100
+    print(f"\nVisibility Statistics:")
+    print(f"Total pixels: {total_pixels:,}")
+    print(f"Visible pixels: {visible_pixels:,}")
+    print(f"Visibility percentage: {visibility_percentage:.2f}%")
+
 
 # Run function
-input_directory = 'output/visibility/binary'
-directory_vis = 'output/visibility'
+input_directory = 'output/visibility/KanaalVanWalcheren/viewsheds'
+directory_vis = 'output/visibility/KanaalVanWalcheren'
 output_file = os.path.join(directory_vis, 'combined_viewshed.tif')
 
 combine_viewsheds(input_directory, output_file)
@@ -184,7 +298,7 @@ output_shapefile = os.path.join(directory_vis, 'viewshed_boundary.shp')
 # 1 gives kinda patchy result?
 smooth_tolerance = 1.0
 min_area = 100
-raster_to_polygon(input_raster, output_shapefile, smooth_tolerance, min_area)
+# raster_to_polygon(input_raster, output_shapefile, smooth_tolerance, min_area)
 
 
 
@@ -231,3 +345,16 @@ def ratio_visibility(viewshed_file, radius, midpoints_file_used_for_visibility, 
         return percentage_visible
 
 # ratio_visibility('visibility/viewshed_0.tif', 100, 'river_shapefiles/river_midpoints_elev_2m.shp', 0)
+
+river = 'output/river/KanaalVanWalcheren/KanaalVanWalcheren_mid.shp'
+gdf = gpd.read_file(river)
+
+# Get the union of the geometries in the shapefile and create a buffer
+river_geometry = gdf.geometry.unary_union
+buffered_area = river_geometry.buffer(200)
+
+# Create a GeoDataFrame from the buffered area, ensuring it has the correct CRS
+# gdfbuf = gpd.GeoDataFrame(geometry=[buffered_area], crs="EPSG:28992")
+
+# Write the buffered area to a new shapefile
+# gdfbuf.to_file('output/river/KanaalVanWalcheren/buffer.shp', driver='ESRI Shapefile')
