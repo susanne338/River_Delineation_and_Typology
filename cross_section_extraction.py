@@ -10,7 +10,8 @@ This is taking forever, we need to optimize the code.
 5. Get elevation values from DSM and DTM
 Using these embankment points, we compute lateral sections, only extending from this point, for the left and right side of the river. These are the sections we use in our further analysis.
 The preprocess cross-sections and points can be removed then.
-
+TODO: clean up
+TODO: make imperviousness function geenrla, only name change. It is raster reading funciton. I also use it for visibility
 """
 import os
 import fiona
@@ -853,6 +854,7 @@ def load_raster_data(imperviousness_raster):
 
 def check_imperviousness(location, raster_data, transform):
     if location is None or location.is_empty or location.geom_type != 'Point':
+        print(f"location is wrong, not point or empty, location is {location}")
         return np.nan
     # Extract coordinates from the Point object
     x, y = location.x, location.y
@@ -863,10 +865,11 @@ def check_imperviousness(location, raster_data, transform):
 
     # Ensure indices are within bounds
     if 0 <= row < raster_data.shape[0] and 0 <= col < raster_data.shape[1]:
-        # Read the pixel value at the point's location
         pixel_value = raster_data[row, col]
+
     else:
         pixel_value = np.nan  # Or another value indicating out-of-bounds
+        print('out of bounds!')
 
     return pixel_value
 
@@ -876,7 +879,7 @@ def compute_imperviousness(row, raster_data, transform):
     return check_imperviousness(location, raster_data, transform)
 
 
-def add_imperviousness_column(shapefile, imperviousness_raster):
+def add_imperviousness_column(shapefile, imperviousness_raster, columnname):
     # Load raster data and transform once
     raster_data, transform = load_raster_data(imperviousness_raster)
 
@@ -887,7 +890,7 @@ def add_imperviousness_column(shapefile, imperviousness_raster):
     tqdm.pandas(desc="Computing imperviousness for each point")
 
     # Pass raster_data and transform to avoid reopening the file each time
-    gdf['imperv'] = gdf.progress_apply(
+    gdf[columnname] = gdf.progress_apply(
         compute_imperviousness,
         axis=1,
         raster_data=raster_data,
@@ -898,48 +901,43 @@ def add_imperviousness_column(shapefile, imperviousness_raster):
     gdf.to_file(shapefile)
     print(f"Updated shapefile saved to: {shapefile}")
 
-# def check_imperviousness(location, imperviousness_raster):
-#     with rasterio.open(imperviousness_raster) as src:
-#         # read band 1 (number between 1-100)
-#         imperviousness_data = src.read(1)
-#
-#         # Extract coordinates from the Point object
-#         x, y = location.x, location.y
-#
-#         # Get the row, col index of the pixel corresponding to the point
-#         row, col = src.index(x, y)
-#
-#         # Read the pixel value at the point's location
-#         pixel_value = imperviousness_data[row, col]
-#         print(f"The pixel value at ({x}, {y}) is: {pixel_value}")
-#         return pixel_value
-#
-# def compute_imperviousness(row, imperviousness_raster):
-#     location = row['geometry']
-#     return check_imperviousness(location, imperviousness_raster)
-#
-# def add_imperviousness_column(shapefile, imperviousness_raster):
-#     gdf = gpd.read_file(shapefile)
-#     # tqdm.pandas(desc="Computing impreviousness for each point")
-#     gdf['imperv'] = gdf.progress_apply(compute_imperviousness, axis=1, imperviousness_raster=imperviousness_raster)
-#     gdf.to_file(shapefile)
-#     print(f"Updated shapefile saved to: {shapefile}")
-#     return
-#
-
 
 # imperviouness_data = 'input/imperviousness/imperv_reproj_28992.tif'
-# add_imperviousness_column(output_pts, imperviouness_data)
+# add_imperviousness_column(output_pts, imperviouness_data, 'imperv')
+
 
 # gdf = gpd.read_file(output_pts)
 # print("Columns in the shapefile:", gdf.columns.tolist())
 # missing_imperv_count = gdf['imperv'].isna().sum()
 # print(f"Missing imperviousness is {missing_imperv_count} ")
 # gdf.to_csv("only_to_check.csv", index=False)
+# gdf = gpd.read_file(output_pts)
+# print("Columns in the shapefile:", gdf.columns.tolist())
+# missing_imperv_count = gdf['imperv'].isna().sum()
+# print(f"Missing imperviousness is {missing_imperv_count} ")
+# unique_counts = gdf['imperv'].value_counts()
+# print(unique_counts)
+# gdf.to_csv("only_to_check.csv", index=False)
+
+# VISIBILITY------------------------------------------------------------------------------------------------------------
+# Before running visibility, it needs to run the viewshed function first, which implies running the metric function first
+visiblitlity_data = 'output/visibility/KanaalVanWalcheren/combined_viewshed.tif'
+add_imperviousness_column(output_pts, visiblitlity_data, 'visible')
+
 gdf = gpd.read_file(output_pts)
 print("Columns in the shapefile:", gdf.columns.tolist())
-missing_imperv_count = gdf['imperv'].isna().sum()
-print(f"Missing imperviousness is {missing_imperv_count} ")
-unique_counts = gdf['imperv'].value_counts()
-print(unique_counts)
-# gdf.to_csv("only_to_check.csv", index=False)
+visible_counts = gdf['visible'].value_counts(dropna=False)
+
+# Get the counts for 0.0, 1.0, and other values (including NaN)
+count_0 = visible_counts.get(0.0, 0)
+count_1 = visible_counts.get(1.0, 0)
+count_nan = gdf['visible'].isna().sum()  # Count NaN values
+count_other = visible_counts.sum() - count_0 - count_1
+
+# Print the results
+print(f"Count of rows with 'visible' = 0.0: {count_0}")
+print(f"Count of rows with 'visible' = 1.0: {count_1}")
+print(f"Count of rows with 'visible' = NaN (missing): {count_nan}")
+print(f"Count of rows with 'visible' = other or missing: {count_other}")
+
+gdf.to_csv('test.csv', index = False)
