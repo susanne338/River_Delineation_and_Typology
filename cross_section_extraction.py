@@ -15,6 +15,7 @@ TODO: make imperviousness function geenrla, only name change. It is raster readi
 """
 import os
 import fiona
+import pyproj
 import rasterio
 import pandas as pd
 from tqdm import tqdm
@@ -438,79 +439,6 @@ def extract_max_elevation_values(shapefile, midpoints_file, embankments_file_lef
     embankment_points_right.to_file(embankments_file_right, driver="ESRI Shapefile")
     print(f"Results saved to {midpoints_file} and {embankments_file_right}")
 
-
-# Get correct cross-section outward from embankment points--------------------------------------------------------------
-# x
-# def get_outward_cross_sections(riverline, embank_points_left, embankmet_points_right, width, output_file):
-#     """
-#     Gets the outward cross-sections from the boundary points pointing outwards with respect to the river
-#     Args:
-#         riverline: Shapefile of river
-#         boundary_points: Shapefile of embankment points
-#         width: width of section (100m)
-#         output_file: Shapefile to write output to
-#
-#     Returns:
-#
-#     """
-#     gdf_riv = gpd.read_file(riverline)
-#     gdf_left = gpd.read_file(embank_points_left)
-#     gdf_right = gpd.read_file(embankmet_points_right)
-#     # print(f"gdf points {gdf_pts}")
-#     cross_sections = []
-#     for index, row in gdf_left.iterrows():
-#         geometry = row['geometry']
-#         # print(f"point {pt}")
-#         # pt_geom = pt.iloc['geometry']
-#         # print(f"geometry point {pt_geom}")
-#         cs = get_outward_cross_section(gdf_riv, geometry, width)
-#         cross_sections.append(cs)
-#
-#     gdf = gpd.GeoDataFrame(geometry=cross_sections)
-#     gdf.set_crs(epsg=28992, inplace=True)
-#     gdf.to_file(output_file, driver='ESRI Shapefile')
-#     return
-#
-# # x
-# def get_outward_cross_section(line, embank_point, width):
-#     """
-#     Generates a cross-Section that points outward from the riverline at a given boundary point.
-#
-#     Parameters:
-#     line (LineString): The river centerline geometry.
-#     boundary_point (Point): The point on the river boundary where the cross-section should originate.
-#     width (float): The desired width of the cross-section.
-#
-#     Returns:
-#     LineString: The outward-pointing cross-section geometry.
-#     """
-#     # Get the tangent angle at the boundary point
-#     # print(f"line is {type(line)} and geometry of first is {type(line.iloc[0]['geometry'])}")
-#     # print(f"point {type(embank_point)}")
-#     line_geom = line.iloc[0]['geometry']
-#     small_distance = 0.001
-#     if line_geom.project(embank_point) + small_distance <= line_geom.length:
-#         point_ahead = line_geom.interpolate(line_geom.project(embank_point) + small_distance)
-#     else:
-#         point_ahead = line_geom.interpolate(line_geom.length)
-#
-#     if embank_point:
-#         x0, y0 = embank_point.x, embank_point.y
-#         x1, y1 = point_ahead.x, point_ahead.y
-#         angle = np.arctan2(y1 - y0, x1 - x0)
-#
-#     # Calculate the outward-pointing line endpoints
-#         dx = width / 2 * np.cos(angle)
-#         dy = width / 2 * np.sin(angle)
-#         p1 = Point(x0 + dx, y0 + dy)
-#         p2 = Point(x0 - dx, y0 - dy)
-#         return LineString([p1, p2])
-#     else:
-#         print("embankment point is none ")
-#         return None
-#
-#     return LineString([p1, p2])
-
 # riverwidth
 def cross_section_extraction_added_riverwidth(river_file, interval, width, output_file_cs, inputriver_mid):
     """
@@ -586,6 +514,7 @@ def create_cross_section_points_added_riverwidth(cross_sections_shapefile, width
         if row.geometry is not None:
             print('Valid cs', ind)
             river_width = midpoint_gdf.iloc[ind]['width']
+            print(f"river width is {river_width}")
             total_width = river_width + width
             n_points = int(total_width / 0.5)
 
@@ -626,6 +555,7 @@ def create_cross_section_points_added_riverwidth(cross_sections_shapefile, width
                 'h_distance': None
             })
 
+
     # Create GeoDataFrame
     gdf = gpd.GeoDataFrame(all_points)
     gdf.set_crs(epsg=28992, inplace=True)
@@ -652,36 +582,25 @@ user_defined_height = 1.75
 width = 100
 number_points = 2 * width
 width2 = 200
-output_cs_l = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_cs_left.shp"
-output_cs_r = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_cs_right.shp"
-output_pts_l = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_left.shp"
-output_pts_r = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_right.shp"
 
 
-output_pts = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points.shp"
+output_pts = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_test.shp"
 output_cs = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_cs_final.shp"
 
 # RUN-------------------------------------------------------------------------------------------------------------------
+# PREPROCESS
 # cross_section_extraction(river, interval, width1, output_cs_preproces, river_midpoints)
 # create_cross_section_points(output_cs_preproces, n_points, points_cs_preprocess)
 # add_elevation_from_tiles(points_cs_preprocess, tiles_folder_dtm, 'elev_dtm')
-
-# gdf = gpd.read_file(points_cs_preprocess)
-# gdf.to_csv("test.csv", index=False)
+# GET EMBANKMENTS AND RIVERWIDTH, afterwards viewhes analysis can correct cs can be done
 # extract_max_elevation_values(points_cs_preprocess, river_midpoints, embankments_file_left, embankments_file_right, user_defined_height)
 
 
 # cross_section_extraction_added_riverwidth(river, interval, 200, output_cs, river_midpoints)
-###### get_outward_cross_sections(river, embankments_file_right, width, output_cs_r)
 # create_cross_section_points_added_riverwidth(output_cs, width, river_midpoints, output_pts)
 # add_elevation_from_tiles(output_pts, tiles_folder_dtm, 'elev_dtm')
 # add_elevation_from_tiles(output_pts, tiles_folder_dsm, 'elev_dsm')
 # add_elevation_from_tiles(output_pts, "input/flood/middelgrote_kans", 'flood_dept')
-
-# ###get_outward_cross_sections(river, embankments_file_left, width, output_cs_l)
-##### create_cross_section_points(output_cs_l, number_points, output_pts_l)
-#### add_elevation_from_tiles(output_pts_l, tiles_folder_dtm, 'elev_dtm')
-#### add_elevation_from_tiles(output_pts_l, tiles_folder_dsm, 'elev_dsm')
 
 # LANDUSE---------------------------------------------------------------------------------------------------------------
 
@@ -818,126 +737,195 @@ def add_landuse_to_shapefile(shapefile_path, gpkg_folder):
 
 def extract_unique_landuses(shapefile_path, output_file):
     """
-    Extract unique landuse values from a shapefile.
-
-    Args:
-        shapefile_path: Path to the shapefile containing landuse information
-        output_file: Path to save the unique landuses CSV
+    Extract unique landuse types from a shapefile, properly splitting combined values
+    and assigning unique indices to individual landuse types.
     """
-    # Read the shapefile as a GeoDataFrame
+    # Read the shapefile
     points_gdf = gpd.read_file(shapefile_path)
 
-    # Extract unique landuse values
-    unique_landuses = points_gdf['landuse'].dropna().unique()
+    # Create a list to store all individual landuse types
+    individual_landuses = []
 
-    # Convert to DataFrame and save to CSV
-    landuses_df = pd.DataFrame(unique_landuses, columns=['landuse'])
+    # Process each landuse entry
+    for landuse in points_gdf['landuse'].dropna():
+        # Split by semicolon and strip whitespace
+        parts = [part.strip() for part in str(landuse).split(';')]
+        # Add each individual part to our list
+        individual_landuses.extend(parts)
+
+    # Get unique values and sort them
+    unique_landuses = sorted(list(set(individual_landuses)))
+
+    # Create DataFrame with index
+    landuses_df = pd.DataFrame({
+        'landuse': unique_landuses,
+        'index': range(len(unique_landuses))
+    })
+
+    # Print some debug info
+    print("\nFinal DataFrame:")
+    print(landuses_df)
+    print(f"\nTotal unique landuse types: {len(landuses_df)}")
+
+    # Save to CSV
     landuses_df.to_csv(output_file, index=False)
-
     print(f"Unique landuses saved to: {output_file}")
 
-
+    return landuses_df
 # RUN
 # I work with bgt_area now. I do not convert the file anymoer because the conversion gives me errors.
 # I loop over all .gml files. Results in missing values sometimes.
 # add_landuse_to_shapefile(output_pts, 'input/BGT/bgt_area')
-# extract_unique_landuses(output_pts, 'output/parameters/unique_landuses.csv')
+extract_unique_landuses(output_pts, 'output/parameters/unique_landuses.csv')
 
-# IMPERVIOUSNESS----------------------------------------------------------------------------------------------
-def load_raster_data(imperviousness_raster):
-    with rasterio.open(imperviousness_raster) as src:
-        # Load entire raster into memory
+# IMPERVIOUSNESS AND VISIBILITY--------------------------------------------------------------------
+def normalize_crs(crs):
+    """
+    Normalize CRS to EPSG:28992 if it's any variant of Amersfoort RD New
+    """
+    if crs:
+        # Check for various forms of Amersfoort RD New
+        if any(marker in str(crs).upper() for marker in ['AMERSFOORT', 'RD NEW', '28992']):
+            return pyproj.CRS.from_epsg(28992)
+    return crs
+
+
+def load_raster_data(raster_path):
+    """
+    Load raster data and return necessary components for processing.
+    """
+    with rasterio.open(raster_path) as src:
         data = src.read(1)  # Read the first band
         transform = src.transform
-    return data, transform
+        bounds = src.bounds
+        crs = normalize_crs(src.crs)
+        print(f"Raster transform: {transform}")
+        print(f"Raster shape: {data.shape}")
+    return data, transform, bounds, crs
 
 
-def check_imperviousness(location, raster_data, transform):
+def check_raster_value(location, raster_data, transform, bounds):
+    """
+    Check raster value at a given point location.
+    """
     if location is None or location.is_empty or location.geom_type != 'Point':
-        print(f"location is wrong, not point or empty, location is {location}")
+        print(f"Invalid location: {location}")
         return np.nan
-    # Extract coordinates from the Point object
+
     x, y = location.x, location.y
 
-    # Get the row, col index of the pixel corresponding to the point
-    row, col = ~transform * (x, y)
-    row, col = int(row), int(col)
+    # Check if point is within raster bounds with a small buffer
+    buffer = 1.0  # 1 meter buffer
+    if not (bounds.left - buffer <= x <= bounds.right + buffer and
+            bounds.bottom - buffer <= y <= bounds.top + buffer):
+        print(f"Point ({x}, {y}) is outside raster bounds: {bounds}")
+        return np.nan
 
-    # Ensure indices are within bounds
-    if 0 <= row < raster_data.shape[0] and 0 <= col < raster_data.shape[1]:
-        pixel_value = raster_data[row, col]
+    try:
+        # Convert coordinates to pixel indices using rasterio's rowcol function
+        row, col = rowcol(transform, x, y)
 
-    else:
-        pixel_value = np.nan  # Or another value indicating out-of-bounds
-        print('out of bounds!')
+        # Convert to integers
+        row, col = int(row), int(col)
 
-    return pixel_value
+        # Debug information
+        print(f"Point coordinates: ({x}, {y})")
+        print(f"Pixel coordinates: (row={row}, col={col})")
+        print(f"Raster shape: {raster_data.shape}")
+
+        # Ensure indices are within array bounds
+        if 0 <= row < raster_data.shape[0] and 0 <= col < raster_data.shape[1]:
+            value = raster_data[row, col]
+            print(f"Sampled value: {value}")
+            return value
+        else:
+            print(f"Computed pixel coordinates ({row}, {col}) are outside raster dimensions {raster_data.shape}")
+            return np.nan
+
+    except Exception as e:
+        print(f"Error processing point ({x}, {y}): {str(e)}")
+        return np.nan
 
 
-def compute_imperviousness(row, raster_data, transform):
+def compute_raster_value(row, raster_data, transform, bounds):
+    """
+    Compute raster value for a GeoDataFrame row.
+    """
     location = row['geometry']
-    return check_imperviousness(location, raster_data, transform)
+    return check_raster_value(location, raster_data, transform, bounds)
 
 
-def add_imperviousness_column(shapefile, imperviousness_raster, columnname):
-    # Load raster data and transform once
-    raster_data, transform = load_raster_data(imperviousness_raster)
+def add_raster_column(shapefile_path, raster_path, column_name, overwrite=True):
+    """
+    Add raster values as a new column to a shapefile.
+    """
+    # Load raster data
+    raster_data, transform, bounds, raster_crs = load_raster_data(raster_path)
 
     # Load shapefile data
-    gdf = gpd.read_file(shapefile)
+    gdf = gpd.read_file(shapefile_path)
 
-    # Use tqdm with progress_apply
-    tqdm.pandas(desc="Computing imperviousness for each point")
+    # Normalize the shapefile CRS
+    gdf.crs = normalize_crs(gdf.crs)
 
-    # Pass raster_data and transform to avoid reopening the file each time
-    gdf[columnname] = gdf.progress_apply(
-        compute_imperviousness,
-        axis=1,
-        raster_data=raster_data,
-        transform=transform
-    )
+    # Print CRS information
+    print(f"Normalized Shapefile CRS: {gdf.crs}")
+    print(f"Normalized Raster CRS: {raster_crs}")
+
+    # Print bounds information
+    print(f"\nRaster bounds: {bounds}")
+    print(f"Points extent: {gdf.total_bounds}")
+
+    # Verify points overlap with raster
+    points_bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
+    if not (bounds.left <= points_bounds[2] and points_bounds[0] <= bounds.right and
+            bounds.bottom <= points_bounds[3] and points_bounds[1] <= bounds.top):
+        print("WARNING: Points extent does not overlap with raster extent!")
+
+    # Check if column exists
+    if column_name in gdf.columns and not overwrite:
+        raise ValueError(f"Column {column_name} already exists and overwrite=False")
+
+    # Process points in smaller chunks to avoid memory issues
+    chunk_size = 1000
+    num_chunks = len(gdf) // chunk_size + (1 if len(gdf) % chunk_size else 0)
+
+    results = []
+    for i in tqdm(range(num_chunks), desc=f"Processing chunks"):
+        start_idx = i * chunk_size
+        end_idx = min((i + 1) * chunk_size, len(gdf))
+        chunk = gdf.iloc[start_idx:end_idx]
+
+        chunk_results = chunk.apply(
+            compute_raster_value,
+            axis=1,
+            raster_data=raster_data,
+            transform=transform,
+            bounds=bounds
+        )
+        results.extend(chunk_results)
+
+    # Add results to the GeoDataFrame
+    gdf[column_name] = results
 
     # Save updated shapefile
-    gdf.to_file(shapefile)
-    print(f"Updated shapefile saved to: {shapefile}")
+    gdf.to_file(shapefile_path)
+    print(f"\nUpdated shapefile saved to: {shapefile_path}")
 
+    # Print summary statistics
+    valid_values = gdf[column_name].dropna()
+    print("\nSummary statistics for sampled values:")
+    print(f"Total points: {len(gdf)}")
+    print(f"Valid values: {len(valid_values)}")
+    print(f"Invalid/out of bounds: {len(gdf) - len(valid_values)}")
+    if len(valid_values) > 0:
+        print(f"Min value: {valid_values.min()}")
+        print(f"Max value: {valid_values.max()}")
+        print(f"Mean value: {valid_values.mean():.2f}")
 
-# imperviouness_data = 'input/imperviousness/imperv_reproj_28992.tif'
-# add_imperviousness_column(output_pts, imperviouness_data, 'imperv')
+points_file = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_test.shp"
+visible_raster = "output/visibility/KanaalVanWalcheren/combined_viewshed.tif"
+imperv_raster = "input/imperviousness/imperv_reproj_28992.tif"
 
-
-# gdf = gpd.read_file(output_pts)
-# print("Columns in the shapefile:", gdf.columns.tolist())
-# missing_imperv_count = gdf['imperv'].isna().sum()
-# print(f"Missing imperviousness is {missing_imperv_count} ")
-# gdf.to_csv("only_to_check.csv", index=False)
-# gdf = gpd.read_file(output_pts)
-# print("Columns in the shapefile:", gdf.columns.tolist())
-# missing_imperv_count = gdf['imperv'].isna().sum()
-# print(f"Missing imperviousness is {missing_imperv_count} ")
-# unique_counts = gdf['imperv'].value_counts()
-# print(unique_counts)
-# gdf.to_csv("only_to_check.csv", index=False)
-
-# VISIBILITY------------------------------------------------------------------------------------------------------------
-# Before running visibility, it needs to run the viewshed function first, which implies running the metric function first
-visiblitlity_data = 'output/visibility/KanaalVanWalcheren/combined_viewshed.tif'
-add_imperviousness_column(output_pts, visiblitlity_data, 'visible')
-
-gdf = gpd.read_file(output_pts)
-print("Columns in the shapefile:", gdf.columns.tolist())
-visible_counts = gdf['visible'].value_counts(dropna=False)
-
-# Get the counts for 0.0, 1.0, and other values (including NaN)
-count_0 = visible_counts.get(0.0, 0)
-count_1 = visible_counts.get(1.0, 0)
-count_nan = gdf['visible'].isna().sum()  # Count NaN values
-count_other = visible_counts.sum() - count_0 - count_1
-
-# Print the results
-print(f"Count of rows with 'visible' = 0.0: {count_0}")
-print(f"Count of rows with 'visible' = 1.0: {count_1}")
-print(f"Count of rows with 'visible' = NaN (missing): {count_nan}")
-print(f"Count of rows with 'visible' = other or missing: {count_other}")
-
-gdf.to_csv('test.csv', index = False)
+# add_raster_column(shapefile_path=points_file, raster_path=visible_raster, column_name="visible")
+# add_raster_column(shapefile_path=points_file, raster_path=imperv_raster, column_name='imperv')
