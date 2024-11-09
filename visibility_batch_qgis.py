@@ -8,7 +8,8 @@ When I run it for a small batch first to test, then running it again afterwards 
 A solution to this is to open a new project in QGIS and run it from there
 TODO: make it so it deletes the tif files non-binary
 """
-
+import numpy as np
+import math
 import processing
 import os
 from glob import glob
@@ -72,11 +73,16 @@ dem_path = clipped_dem_path
 
 # Loop through each point in the shapefile
 for i, feature in enumerate(points_layer.getFeatures()):
-    if i <1:
+    if i < 1 :
         river_width = feature['width']
+        print(f"river width before is {river_width}")
+        if river_width == 0.0: #If width is zero, then there is no embankment points (only water)
+            river_width = 200 #Default value for river width (cs width)
+        print(f"river width after is {river_width}")
         max_distance = 100 + 0.5 * river_width
         point_geom = feature.geometry().asPoint()  # Get the point's geometry as a coordinate (x, y)
-        height = feature['height']
+        height = feature['height'] or 1.75 #if height value is None/NULL then we assign a default. Height is only None is we don't use the cross-section as it only contains water
+        print(f"river height is {height}")
         print(f"Processing feature ID: {feature.id()} with height: {feature['height']}")
         point_id = feature.id()  # Get the ID of the point feature
 
@@ -100,21 +106,21 @@ for i, feature in enumerate(points_layer.getFeatures()):
             print(f"Viewshed output failed for point ID: {point_id}")
 
         # Binary
-        print(params.keys())
-        viewshed_output_path = params['output']
-        binary_output_path = f'C:/Users/susan/Documents/thesis/Thesis-terminal/output/visibility/KanaalVanWalcheren/binary/binary_viewshed_{point_id}.tif'
-
-        # Reclassify to create binary output
-        reclass_params = {
-            'INPUT_A': viewshed_output_path,  # Input raster A
-            'BAND_A': 1,  # Band number for input A
-            'FORMULA': 'A >= 1',  # Reclassification formula
-            'OUTPUT': binary_output_path,
-            'NO_DATA': None,
-            'RTYPE': 1,  # Output raster type (Byte/Int8)
-            'OPTIONS': ''
-        }
-
-        processing.run("gdal:rastercalculator", reclass_params)
+        # print(params.keys())
+        # viewshed_output_path = params['output']
+        # binary_output_path = f'C:/Users/susan/Documents/thesis/Thesis-terminal/output/visibility/KanaalVanWalcheren/binary/binary_viewshed_{point_id}.tif'
+        #
+        # # Reclassify to create binary output
+        # reclass_params = {
+        #     'INPUT_A': viewshed_output_path,  # Input raster A
+        #     'BAND_A': 1,  # Band number for input A
+        #     'FORMULA': 'A >= 1',  # Reclassification formula
+        #     'OUTPUT': binary_output_path,
+        #     'NO_DATA': None,
+        #     'RTYPE': 1,  # Output raster type (Byte/Int8)
+        #     'OPTIONS': ''
+        # }
+        #
+        # processing.run("gdal:rastercalculator", reclass_params)
 
 print("Batch process completed!")
