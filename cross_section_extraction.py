@@ -112,7 +112,7 @@ def get_perpendicular_cross_section(line, distance_along_line, width):
 
 
 # Get points along cross-section, and h_distance. Add elevation to each point from DTM----------------------------------
-def create_cross_section_points(cross_sections_shapefile, n_points, output_shapefile):
+def create_cross_section_points(cross_sections_shapefile, width, output_shapefile):
     """
     Creates points along cross-sections and calculates horizontal distances.
 
@@ -129,6 +129,7 @@ def create_cross_section_points(cross_sections_shapefile, n_points, output_shape
     print(f"Loaded {len(cross_sections)} cross-sections from {cross_sections_shapefile}")
 
     all_points = []
+    n_points= 2 * width
 
     for ind, row in cross_sections.iterrows():
         print('Processing cross-section', ind)
@@ -353,7 +354,42 @@ def extract_max_elevation_values(shapefile, midpoints_file, embankments_file_lef
     embankment_points_right.to_file(embankments_file_right, driver="ESRI Shapefile")
     print(f"Results saved to {midpoints_file} and {embankments_file_right}")
 
-# riverwidth
+
+# RUN PREPROCESS--------------------------------------------------------------------------------------------------------
+"""
+Get preprocess cross-sections, create the points on these, and add elevation from the DTM. 
+Then extract the embankment data and viewpoint height for viewshed analysis
+"""
+
+
+# DATA
+river = "input/river/longest_river.shp"
+tiles_folder_dtm = "input/AHN/KanaalVanWalcheren/DTM_test"
+tiles_folder_dsm = "input/AHN/KanaalVanWalcheren/DSM_test"
+# FILES
+output_cs_preproces = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_cs_pre.shp"
+points_cs_preprocess = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_pts_cs_pre.shp"
+river_midpoints = "output/river/KanaalVanWalcheren/KanaalVanWalcheren_mid.shp"
+embankments_file_left = "output/embankment/KanaalVanWalcheren/left/left.shp"
+embankments_file_right = "output/embankment/KanaalVanWalcheren/right/right.shp"
+# PARAMETERS
+interval = 50
+width_preprocess = 200
+user_defined_height = 1.75
+# RUN
+# cross_section_extraction(river, interval, width_preprocess, output_cs_preproces, river_midpoints)
+# create_cross_section_points(output_cs_preproces,width_preprocess, points_cs_preprocess)
+# add_elevation_from_tiles(points_cs_preprocess, tiles_folder_dtm, 'elev_dtm')
+# extract_max_elevation_values(points_cs_preprocess, river_midpoints, embankments_file_left, embankments_file_right, user_defined_height)
+
+# VSIBILITY ANALYSIS----------------------------------------------------------------------------------------------------
+"""
+Inbetween the pre-process and the parameter extraction, the viewshed analysis can be done. I do this using a script for
+batch process in the QGIS python console visibility_batch_qgis.py
+"""
+
+
+# EXTRACT CROSS-SECTIONS WITH RIVER WIDTH-------------------------------------------------------------------------------
 def cross_section_extraction_added_riverwidth(river_file, interval, width, output_file_cs, inputriver_mid):
     """
     Get cross-sections
@@ -480,39 +516,33 @@ def create_cross_section_points_added_riverwidth(cross_sections_shapefile, width
 
     return gdf
 
-# Parameters, input and output files-----------------------------------------------------------------------------------
-river = "input/river/longest_river.shp"
+# RUN CROSS-SECTION EXTRACTION------------------------------------------------------------------------------------------
+"""
+Cross-section that extend a width value beyond the river width are computed and points on these are added
+"""
+
+# PARAMETERS
+width = 200
 interval = 50
-width1 = 200
-output_cs_preproces = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_cs_pre.shp"
-river_midpoints = "output/river/KanaalVanWalcheren/KanaalVanWalcheren_mid.shp"
-n_points = 2 * width1
-points_cs_preprocess = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_pts_cs_pre.shp"
-tiles_folder_dtm = "input/AHN/KanaalVanWalcheren/DTM_test"
-tiles_folder_dsm = "input/AHN/KanaalVanWalcheren/DSM_test"
-embankments_file_left = "output/embankment/KanaalVanWalcheren/left/left.shp"
-embankments_file_right = "output/embankment/KanaalVanWalcheren/right/right.shp"
-user_defined_height = 1.75
-width = 100
-number_points = 2 * width
-width2 = 200
-
-
+# FILES
 output_pts = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_test.shp"
 output_cs = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_cs_final.shp"
-
-# RUN PREPROCESS--------------------------------------------------------------------------------------------------------
-# cross_section_extraction(river, interval, width1, output_cs_preproces, river_midpoints)
-# create_cross_section_points(output_cs_preproces, n_points, points_cs_preprocess)
-# add_elevation_from_tiles(points_cs_preprocess, tiles_folder_dtm, 'elev_dtm')
-# GET EMBANKMENTS AND RIVERWIDTH, afterwards viewshed analysis can correct cs can be done
-# extract_max_elevation_values(points_cs_preprocess, river_midpoints, embankments_file_left, embankments_file_right, user_defined_height)
-# DO VIEWSHED ANALYSIS--------------------------------------------------------------------------------------------------
+# RUN
+# cross_section_extraction_added_riverwidth(river, interval, width, output_cs, river_midpoints)
+# create_cross_section_points_added_riverwidth(output_cs, width, river_midpoints, output_pts)
 
 
+# PARAMETERS----------------------------------------------------------------------------------------------------------
+"""
+Parameter values for DTM elevation, DSM elevation, visibility and imperviousness are added to each point,
+Each point gets a landuse description, sometimes having multiple. 
+DTM, DSM, and flood data are added via the previous add_elevation_from_tiles function.
+Imperviousness, visibility data are added via add_raster_column.
+"""
+# TODO: why via different functions? Don't they do the same thing?
 
-# LANDUSE---------------------------------------------------------------------------------------------------------------
 
+# LANDUSE
 def process_landuse(points_gdf, gpkg_folder):
     """
     Add landuse information to points GeoDataFrame from gpkg files from BGT data.
@@ -681,13 +711,9 @@ def extract_unique_landuses(shapefile_path, output_file):
     print(f"Unique landuses saved to: {output_file}")
 
     return landuses_df
-# RUN
-# I work with bgt_area now. I do not convert the file anymoer because the conversion gives me errors.
-# I loop over all .gml files. Results in missing values sometimes.
-# add_landuse_to_shapefile(output_pts, 'input/BGT/bgt_area')
-# extract_unique_landuses(output_pts, 'output/parameters/unique_landuses.csv')
 
-# IMPERVIOUSNESS AND VISIBILITY-----------------------------------------------------------------------------------------
+
+# IMPERVIOUSNESS AND VISIBILITY
 def normalize_crs(crs):
     """
     Normalize CRS to EPSG:28992 if it's any variant of Amersfoort RD New
@@ -832,11 +858,15 @@ def add_raster_column(shapefile_path, raster_path, column_name, overwrite=True):
         print(f"Max value: {valid_values.max()}")
         print(f"Mean value: {valid_values.mean():.2f}")
 
+
+# FILES
 points_file = "output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_test.shp"
 visible_raster = "output/visibility/KanaalVanWalcheren/combined_viewshed.tif"
 imperv_raster = "input/imperviousness/imperv_reproj_28992.tif"
-# cross_section_extraction_added_riverwidth(river, interval, 200, output_cs, river_midpoints)
-# create_cross_section_points_added_riverwidth(output_cs, width, river_midpoints, output_pts)
+
+# RUN
+# add_landuse_to_shapefile(output_pts, 'input/BGT/bgt_area')
+# extract_unique_landuses(output_pts, 'output/parameters/unique_landuses.csv')
 # add_elevation_from_tiles(output_pts, tiles_folder_dtm, 'elev_dtm')
 # add_elevation_from_tiles(output_pts, tiles_folder_dsm, 'elev_dsm')
 # add_elevation_from_tiles(output_pts, "input/flood/middelgrote_kans", 'flood_dept')
@@ -844,50 +874,56 @@ imperv_raster = "input/imperviousness/imperv_reproj_28992.tif"
 # add_raster_column(shapefile_path=points_file, raster_path=imperv_raster, column_name='imperv')
 
 # SPLIT SECTIONS INTO LEFT AND RIGHT-----------------------------------------------------------------------------------
-
+"""
+The cross-sections are split in the middle, mainly for the purpose of finding building intersections.
+Left and right can then be processed seperatly. Side 0 is left, side 1 is right
+Cross-section halves are saved to a seperate 'halves' file
+Split points is added in columns to the points shapefile. 
+columns: ['id', 'h_distance', 'visible', 'imperv', 'elev_dtm', 'elev_dsm',
+       'landuse', 'flood_dept', 'side', 'split_h_di', 'geometry']
+Split cross-sections shapefile are used for the building intersections
+columns: ['id', 'side', 'geometry']
+Split points shapefile is used for further metric computation
+"""
 def split_cross_sections(midpoints_shp, cross_sections_shp):
     """
-    Splits the cross-section file in half.
-    Example: 'FID' = 0 changes to 'FID' = 0_left and FID = '0_right'
-
+    Splits the cross-section geometries in half and adds the left and right linestrings
+    to a new shapefile.
 
     Args:
-        midpoints_shp:
-        cross_sections_shp:
+        midpoints_shp (str): File path to the midpoints shapefile.
+        cross_sections_shp (str): File path to the cross-sections shapefile.
 
-    Returns: new cross_sections geodataframe
-    TODO: save shapefile
+    Returns:
+        None
     """
-
     midpoints = gpd.read_file(midpoints_shp)
     cross_sections = gpd.read_file(cross_sections_shp)
 
+    # Create lists to store the data for the output GeoDataFrame
+    ids = []
+    sides = []
+    geometries = []
 
-    # Split cross-sections into left and right halves
-    split_cross_sections = []
-    for _, row in cross_sections.iterrows():
+    for idx, row in cross_sections.iterrows():
         cross_section = row.geometry
         if cross_section is not None:
             midpoint = midpoints[midpoints['FID'] == row['FID']].iloc[0].geometry
             coords = list(cross_section.coords)
-            left_line = LineString([midpoint, coords[0]]) # Use midpoint shapefile to determine the splitpoint
+            left_line = LineString([midpoint, coords[0]])
             right_line = LineString([midpoint, coords[-1]])
-            split_cross_sections.append((left_line, right_line))
-        else:
-            split_cross_sections.append((None, None))
 
-    # Update cross_sections GeoDataFrame
-    cross_sections_out = gpd.GeoDataFrame(geometry=[ls[0] for ls in split_cross_sections] +
-                                                   [ls[1] for ls in split_cross_sections],
-                                          crs=cross_sections.crs)
-    cross_sections_out['FID'] = [f"{row[1]['FID']}_left" for row in cross_sections.iterrows()] + \
-                                [f"{row[1]['FID']}_right" for row in cross_sections.iterrows()]
+            # Append the left and right linestrings to the lists
+            ids.extend([row['FID'], row['FID']])
+            sides.extend([0, 1])
+            geometries.extend([left_line, right_line])
 
-    return cross_sections_out
+    # Create the output GeoDataFrame
+    output_df = gpd.GeoDataFrame({'id': ids, 'side': sides, 'geometry': geometries}, crs=midpoints.crs)
 
+    # Save the output GeoDataFrame to a new shapefile
+    output_df.to_file(midpoints_shp.replace('.shp', '_halves.shp'))
 
-cs_out = split_cross_sections(midpoints_shp=river_midpoints, cross_sections_shp=output_cs)
-cs_out.to_file("output/cross_sections/KanaalVanWalcheren/halves_.shp", driver="ESRI Shapefile")
 
 def split_points(points_shp):
     """
@@ -923,18 +959,28 @@ def split_points(points_shp):
     return
 
 # split_points(output_pts)
+gdf = gpd.read_file("output/river/KanaalVanWalcheren/KanaalVanWalcheren_mid_halves.shp")
+print(gdf.columns)
+# split_cross_sections(midpoints_shp=river_midpoints, cross_sections_shp=output_cs)
 
-# BUILDING INTERSECTION-------------------------------------------------------------------------------------------------
-def building_parameters(midpoints_shp, cross_sections_shp, building_gpkg, river_shp):
+# BUILDING INTERSECTION------------------------------------------------------------------------------------------------
+"""
+Get the intersections of the cross-sections with buildings.
+Adds the first point of intersection and the max building height of this intersection to the shapefile containing the half cross-sections
+Produces a shapefile with intersections with columns id and geometry (linestring)
+"""
+def building_parameters(cs_halvex_shp, building_gpkg, intersection_output_file):
     """
     Compute parameters related to building intersections with the river space.
+    This version handles cross-sections that have already been split into left and right parts, with the input file in a custom format.
 
     Parameters:
-    midpoints_shp (str): Path to the GeoDataFrame containing the river midpoints.
-    cross_sections_shp (str): Path to the GeoDataFrame containing the cross-sections.
+    cs_halvex_shp (str): Path to the Shapefile containing the pre-split cross-sections.
+    building_gpkg (str): Path to the GeoPackage containing the building data.
+    river_shp (str): Path to the Shapefile containing the river geometry.
 
     Returns:
-    GeoDataFrame: The input midpoints_shp GeoDataFrame with additional columns:
+    GeoDataFrame: The input cs_halvex_shp GeoDataFrame with additional columns:
         l_buil1 (Point): The first intersection point on the left side.
         l_height1 (float): The maximum building height of the first intersection on the left.
         l_buil_int (MultiLineString): The geometry of all intersection points on the left.
@@ -943,58 +989,88 @@ def building_parameters(midpoints_shp, cross_sections_shp, building_gpkg, river_
         r_buil_int (MultiLineString): The geometry of all intersection points on the right.
     """
     # Load data
-    midpoints = gpd.read_file(midpoints_shp)
-    cross_sections = gpd.read_file(cross_sections_shp)
-
-    # Prepare data
+    cs_halvex = gpd.read_file(cs_halvex_shp)
     buildings = gpd.read_file(building_gpkg, layer="pand")
-    river = gpd.read_file(river_shp)
+    # river = gpd.read_file(river_shp)
 
-    # Process cross-sections
-    midpoints['l_buil1'] = None
-    midpoints['l_height1'] = None
-    midpoints['l_buil_int'] = None
-    midpoints['r_buil1'] = None
-    midpoints['r_height1'] = None
-    midpoints['r_buil_int'] = None
+    # Prepare additional columns in the cs_halvex GeoDataFrame
+    cs_halvex['l_buil1'] = None
+    cs_halvex['l_height1'] = None
+    # cs_halvex['l_buil_int'] = None
+    cs_halvex['r_buil1'] = None
+    cs_halvex['r_height1'] = None
+    # cs_halvex['r_buil_int'] = None
 
-    for _, row in midpoints.iterrows():
-        midpoint = row.geometry
-        left_line = cross_sections[cross_sections['FID'] == f"{row['FID']}_left"].iloc[0].geometry
-        right_line = cross_sections[cross_sections['FID'] == f"{row['FID']}_right"].iloc[0].geometry
+    intersections_list = []
 
-        # Process left side
-        left_intersections, left_point = get_intersection(left_line, buildings)
-        if left_point is not None:
-            midpoints.at[_, 'l_buil1'] = left_point
-            midpoints.at[_, 'l_height1'] = get_max_height(left_intersections[0][1])
-            midpoints.at[_, 'l_buil_int'] = MultiLineString([LineString([p[0].coords[0] for p in left_intersections])])
+    for _, row in cs_halvex.iterrows():
+        line = row.geometry
+        side = row['side']
 
-        # Process right side
-        right_intersections, right_point = get_intersection(right_line, buildings)
-        if right_point is not None:
-            midpoints.at[_, 'r_buil1'] = right_point
-            midpoints.at[_, 'r_height1'] = get_max_height(right_intersections[0][1])
-            midpoints.at[_, 'r_buil_int'] = MultiLineString([LineString([p[0].coords[0] for p in right_intersections])])
+        if side == 0:  # Left side
+            intersections, point, total = get_intersection(line, buildings)
+            print(f" {_} point {point} and intersections left {total}")
 
-    return midpoints
+
+            if point is not None:
+                cs_halvex.loc[_, 'l_buil1'] = point
+                cs_halvex.loc[_, 'l_height1'] = intersections[0][1]
+                # cs_halvex.loc[_, 'l_buil_int'] = total
+                for line in total:
+                    intersections_list.append([_,line])
+        elif side == 1:  # Right side
+            intersections, point, total = get_intersection(line, buildings)
+            if point is not None:
+                cs_halvex.loc[_, 'r_buil1'] = point
+                cs_halvex.loc[_, 'r_height1'] = intersections[0][1]
+                # cs_halvex.loc[_, 'r_buil_int'] = total
+                for line in total:
+                    intersections_list.append([_,line])
+
+
+    cs_halvex.to_file(cs_halvex_shp)
+    gdf = gpd.GeoDataFrame(intersections_list, columns=["id", "geometry"])
+    gdf.set_crs("EPSG:28992", inplace=True)
+    gdf.to_file(intersection_output_file, driver="ESRI Shapefile")
+
+    return
 
 def get_intersection(line, buildings):
     # Get intersecting buildings directly using spatial operation
     intersecting_buildings = buildings[buildings.intersects(line)]
 
     if len(intersecting_buildings) == 0:
-        return [], None
+        return [], None, []
 
     intersections = []
+    total_intersections = []
     for idx, building in intersecting_buildings.iterrows():
         try:
             intersection = line.intersection(building.geometry)
+            total_intersections.append(intersection)
 
-            if isinstance(intersection, Point):
+            if isinstance(intersection, LineString):
+                intersection_point = Point(intersection.coords[0])
+            elif isinstance(intersection, MultiPolygon):
+                # Take the centroid of the first polygon
+                intersection_point = Point(list(intersection.geoms)[0].centroid)
+            elif isinstance(intersection, Polygon):
+                intersection_point = Point(intersection.centroid)
+            elif isinstance(intersection, Point):
                 intersection_point = intersection
-                max_height = get_max_height(building.geometry)
-                intersections.append([intersection_point, max_height, building['identificatie']])
+            elif isinstance(intersection, MultiLineString):
+                # Get the first LineString in the MultiLineString
+                first_line = intersection.geoms[0]
+                # Get the first coordinate of this LineString
+                first_coord = first_line.coords[0]
+                # Create a Point from the first coordinate
+                intersection_point = Point(first_coord)
+            else:
+                print(f"Unexpected intersection type: {type(intersection)}")
+                continue
+
+            max_height = get_max_height(building.geometry)
+            intersections.append([intersection_point, max_height, building['identificatie']])
 
         except Exception as e:
             print(f"Error processing building {idx}: {e}")
@@ -1002,8 +1078,8 @@ def get_intersection(line, buildings):
     if intersections:
         # Use the actual line for projection
         closest_intersection = min(intersections, key=lambda x: line.project(x[0]))
-        return intersections, closest_intersection[0]
-    return [], None
+        return intersections, closest_intersection[0], total_intersections
+    return [], None, []
 
 def get_max_height(geometry):
     if isinstance(geometry, Polygon):
@@ -1013,7 +1089,9 @@ def get_max_height(geometry):
     else:
         raise ValueError(f"Unexpected geometry type: {type(geometry)}")
 
+
+halves = "output/river/KanaalVanWalcheren/KanaalVanWalcheren_mid_halves.shp"
 buildings = "input/3DBAG/KanaalVanWalcheren/3DBAG_combined_tiles/combined_3DBAG.gpkg"
+intersections = "output/buildings/KanaalVanWalcheren/building_intersections"
 
-# midpoints = building_parameters(river_midpoints, output_cs, buildings, river)
-
+# building_parameters(halves, buildings, intersections)
