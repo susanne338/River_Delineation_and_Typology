@@ -4,7 +4,10 @@
 
 import geopandas as gpd
 import pandas as pd
+import ruptures as rpt
 import numpy as np
+from scipy.interpolate import griddata
+from scipy.ndimage import gaussian_gradient_magnitude
 from tqdm import tqdm
 from shapely.geometry import Point, LineString, Polygon
 
@@ -167,9 +170,6 @@ def compute_imperv_ratio(group):
     ratio = imperv_count / valid_point_count
     return ratio
 
-
-
-
 def building_metrics(group, closest_intersection, intersections, midpoint_row, embankment):
     first_intersection_point = None
     first_building_height = None
@@ -191,6 +191,13 @@ def building_metrics(group, closest_intersection, intersections, midpoint_row, e
         embank_row = embankment[(embankment['id'] == side_id) & (embankment['side'] == side_side)]
         embank_pt = embank_row['geometry'].iloc[0]
         river_space_width = first_intersection_point.distance(embank_pt)
+    else:
+        # If there is not intersection, then we take the distance to the end of the section as river space width
+        embank_row = embankment[(embankment['id'] == side_id) & (embankment['side'] == side_side)]
+        embank_pt = embank_row['split_h_di'].iloc[0]
+        river_space_width = length_side - embank_pt
+
+        first_building_height = first_intersection_point = 0
 
     intersections_lengths = []
 
@@ -203,7 +210,7 @@ def building_metrics(group, closest_intersection, intersections, midpoint_row, e
     if length_side and total_length_intersections:
         ratio = total_length_intersections / length_side
     else:
-        ratio = None
+        ratio = 0
 
     return ratio, first_building_height, first_intersection_point, river_space_width
 
@@ -219,7 +226,9 @@ def visibility_ratio(group):
             count_1 += 1
             continue
         else: print(f"something is wrong")
-    return count_1 / valid_point_count
+    ratio = count_1 / valid_point_count
+    # print(f"ratio is {ratio} for {group.iloc[0]['id']}")
+    return ratio
 
 def visibility_layerdness(group):
     visible_segments = 0
@@ -234,6 +243,188 @@ def visibility_layerdness(group):
             in_visible_segment = False  # We're no longer in a visible segment
     return visible_segments
 
+
+def tree_cover_ratio(group, intersections):
+    tree_count = 0
+
+    for idx, row in group.iterrows():
+        dtm = row['elev_dtm']
+        dsm = row['elev_dsm']
+        if dtm is not None and dsm is not None:
+            elev_diff = dsm - dtm
+            is_tree = True
+            if elev_diff > 2:
+                id = row['id']
+                side = row['side']
+                point = row['geometry']
+                intersect_rows = intersections[(intersections['id'] == side) & (intersections['side'] == side)]
+                # print(f"intersections {intersect_rows} and type \n {type(intersect_rows)}")
+                if not intersect_rows.empty:
+                    for row in intersect_rows:
+                        line = row['geometry']
+                        if isinstance(line, LineString):
+                            intersection = point.intersects(line)
+                            if intersection:
+                                is_tree = False
+                                break
+                if is_tree:
+                    tree_count +=1
+
+    # print(f"tree count {tree_count} length group {len(group)}")
+    return tree_count / len(group)
+
+
+def detect_barriers(group, threshold, min_change_threshold, embankment):
+
+    # Only consider points on land so filter based on split_h_dist
+    side_id = group.iloc[0]['id']
+    side_side = group.iloc[0]['side']
+    embank_row = embankment[(embankment['id'] == side_id) & (embankment['side'] == side_side)]
+    embank_h_dist = embank_row['split_h_di'].values[0]
+
+
+    filtered_group = group[group['split_h_di'] > embank_h_dist]
+    # print(f"group length {len(group)} and filtered group lenth {len(filtered_group)}")
+
+    # Extract the necessary data from the GeoDataFrame
+    x = filtered_group.geometry.x
+    y = filtered_group.geometry.y
+    elevation = filtered_group['elev_dtm'].to_numpy()
+
+    elevation_filled = griddata((x[~np.isnan(elevation)], y[~np.isnan(elevation)]),
+                                elevation[~np.isnan(elevation)],
+                                (x, y), method='nearest')
+
+    # print(f"elevation \n {elevation}")
+    amount_points = len(elevation_filled)
+    close_to_river = amount_points / 3
+
+    gradient_magnitude = gaussian_gradient_magnitude(elevation_filled, sigma=1)
+    barrier_indices = np.where(gradient_magnitude > threshold)[0]
+    barriers_close_to_river = sum(1 for index in barrier_indices if index < close_to_river)
+
+
+
+    model = "l2"  # 'l2' model is used for detecting changes in mean or variance
+    algo = rpt.Binseg(model=model).fit(elevation)
+    # change_points = algo.predict(pen = change_point_penalty)
+    change_points = algo.predict(n_bkps=5)  # Adjust `n_bkps` (number of breakpoints) as necessary
+    # print(f" length group is {len(elevation)} barriers \n {barrier_indices}")
+
+    significant_change_points = []
+    for idx in change_points[:-1]:  # Exclude the last change point (end of profile)
+        if abs(elevation[idx] - elevation[idx - 1]) > min_change_threshold:
+            significant_change_points.append(idx)
+    significant_change_points = np.array(significant_change_points, dtype=int)
+
+    # if len(barrier_indices) != 0.0:
+    #     print(f" group {group.iloc[0]['id']} side {group.iloc[0]['side']} has a barrier in it")
+    #     print(f" amount is {len(barrier_indices)} and {len(significant_change_points)}")
+
+    return len(barrier_indices), barriers_close_to_river, len(significant_change_points)
+
+
+def rugosity(group):
+    x_coords = group.geometry.x.to_numpy()
+    y_coords = group.geometry.y.to_numpy()
+    dtm_elev = group['elev_dtm'].to_numpy()
+    dsm_elev = group['elev_dsm'].to_numpy()
+
+    # Remove NaN values
+    valid_mask_dtm = (~np.isnan(dtm_elev))
+    valid_mask_dsm = (~np.isnan(dsm_elev))
+
+    x_dsm = x_coords[valid_mask_dsm]
+    y_dsm = y_coords[valid_mask_dsm]
+    x_dtm = x_coords[valid_mask_dtm]
+    y_dtm = y_coords[valid_mask_dtm]
+    dtm_elev = dtm_elev[valid_mask_dtm]
+    dsm_elev = dsm_elev[valid_mask_dsm]
+
+    # Calculate total horizontal distances (start to end point)
+    total_horizontal_distance_dtm = np.sqrt(
+        (x_dtm[-1] - x_dtm[0]) ** 2 +
+        (y_dtm[-1] - y_dtm[0]) ** 2
+    )
+
+    total_horizontal_distance_dsm = np.sqrt(
+        (x_dsm[-1] - x_dsm[0]) ** 2 +
+        (y_dsm[-1] - y_dsm[0]) ** 2
+    )
+
+    # Calculate surface distances by summing all segments
+    dtm_surface_distances = np.sqrt(
+        np.diff(x_dtm) ** 2 +
+        np.diff(y_dtm) ** 2 +
+        np.diff(dtm_elev) ** 2
+    )
+
+    dsm_surface_distances = np.sqrt(
+        np.diff(x_dsm) ** 2 +
+        np.diff(y_dsm) ** 2 +
+        np.diff(dsm_elev) ** 2
+    )
+
+    # Sum up the surface distances
+    total_dtm_surface_distance = np.sum(dtm_surface_distances)
+    total_dsm_surface_distance = np.sum(dsm_surface_distances)
+
+    # Compute rugosity indices
+    rugosity_index_dtm = total_dtm_surface_distance / total_horizontal_distance_dtm
+    rugosity_index_dsm = total_dsm_surface_distance / total_horizontal_distance_dsm
+
+    return rugosity_index_dsm, rugosity_index_dtm
+
+
+def analyze_slope_distribution(group, flat_threshold):
+    valid_mask_dtm = ~np.isnan(group['elev_dtm'])
+    group = group[valid_mask_dtm].sort_values('split_h_di')
+
+    # Calculate slopes between consecutive points
+    dx = group['split_h_di'].diff()
+    dy = group['elev_dtm'].diff()
+
+    # Calculate slope (rise over run)
+    slopes = dy / dx
+
+    # Categorize slopes
+    flat_mask = (slopes.abs() <= flat_threshold)
+    positive_mask = (slopes > flat_threshold)
+    negative_mask = (slopes < -flat_threshold)
+
+    # Count points in each category
+    # Note: first point has no slope (NaN), so we categorize it based on the slope to the next point
+    flat_count = flat_mask.sum()
+    positive_count = positive_mask.sum()
+    negative_count = negative_mask.sum()
+    total_points = len(group) - 1  # Excluding first point which has no slope
+
+    flat = round(flat_count / total_points * 100, 2)
+    positive = round(positive_count / total_points * 100, 2)
+    negative = round(negative_count / total_points * 100, 2)
+    mean_slope = round(slopes.mean(), 4)
+    max_slope = round(slopes.max(), 4)
+    min_slope = round(slopes.min(), 4)
+
+    def count_segments(mask):
+        segments = 0
+        in_segment = False
+
+        for value in mask:
+            if value:
+                if not in_segment:
+                    segments += 1
+                    in_segment = True
+            else:
+                in_segment = False
+        return segments
+
+    flat_patches = count_segments(flat_mask)
+    positive_patches = count_segments(positive_mask)
+    negative_patches = count_segments(negative_mask)
+    patches = flat_patches + positive_patches + negative_patches
+
+    return flat, positive, negative, mean_slope, max_slope, min_slope, patches
 
 
 # RUN-------------------------------------------------------------------------------------------------------------------
@@ -252,6 +443,7 @@ def compute_values(points_shp, metric_shp, midpoints_shp, unique_landuse_csv, ha
     cs_shp = gpd.read_file(midpoints_shp)
     # Index(['FID', 'left', 'right', 'max', 'height', 'width', 'geometry'], dtype='object')
     embankment = gpd.read_file(embankment_shp)
+    # embankment h_dist is in terms of h_distance
     # Index(['id', 'side', 'height', 'h_dist', 'geometry'], dtype='object')
 
     # check if 'side' exists
@@ -283,6 +475,10 @@ def compute_values(points_shp, metric_shp, midpoints_shp, unique_landuse_csv, ha
             building_ratio, first_building_height, first_intersection_point, river_space_width = building_metrics(group, closest_building_intersections, building_intersections, matching_cs, embankment)
             vis_rat = visibility_ratio(group)
             vis_layerdness = visibility_layerdness(group)
+            tree_ratio = tree_cover_ratio(group, building_intersections)
+            nr_barriers, nr_barriers_close_to_river, nr_change_points = detect_barriers(group, 0.5, 0.05, embankment)
+            rug_dsm, rug_dtm = rugosity(group)
+            flat, positive, negative, mean_slope, max_slope, min_slope, patches = analyze_slope_distribution(group, 0.1)
         else:
             # Set all metrics to None for invalid cross-sections
             flood_ratio = None
@@ -291,17 +487,26 @@ def compute_values(points_shp, metric_shp, midpoints_shp, unique_landuse_csv, ha
             imperv_ratio = None
             building_ratio, first_building_height, first_intersection_point, river_space_width = None, None, None, None
             vis_rat, vis_layerdness = None, None
+            tree_ratio = None
+            nr_barriers, nr_barriers_close_to_river, nr_change_points = None, None, None
+            rug_dsm, rug_dtm = None, None
+            flat, positive, negative, mean_slope, max_slope, min_slope, patches = None, None, None, None, None, None, None
 
             # This should update the metrics geodataframe
         row_data = {
             'id': idx,
             'side': side,
             'geometry': geometry,
-            'slope': None,
-            'barriers': None,
-            'rugosity': None,
+            'slope_flat': flat,
+            'slope_pos': positive,
+            'slope_neg':negative,
+            'slope_mean': mean_slope,
+            'barriers': nr_barriers,
+            'change_pts': nr_change_points,
+            'rug_dtm': rug_dtm,
+            'rug_dsm': rug_dsm,
             'building': building_ratio,
-            'tree': None,
+            'tree': tree_ratio,
             'land_div': landuse_diversity,
             'imperv': imperv_ratio,
             'flood_rat': flood_ratio,
@@ -329,10 +534,12 @@ halves_shp = 'output/river/KanaalVanWalcheren/KanaalVanWalcheren_mid_halves.shp'
 intersections = "output/buildings/KanaalVanWalcheren/building_intersections/building_intersections.shp"
 closest_intersections = "output/buildings/KanaalVanWalcheren/closest_building_intersections/closest_building_intersections.shp"
 embankments_file = "output/embankment/KanaalVanWalcheren/embankments.shp"
+metrics_output = "output/metrics/metrics/metrics.shp"
 
-compute_values(points_shp="output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_test.shp", metric_shp="metric_test.shp", midpoints_shp=midpoints_shp, unique_landuse_csv='output/parameters/unique_landuses.csv', halves_shp=halves_shp, building_intersections_shp=intersections, closest_building_intersections_shp=closest_intersections, embankment_shp=embankments_file)
+compute_values(points_shp="output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_test.shp", metric_shp=metrics_output, midpoints_shp=midpoints_shp, unique_landuse_csv='output/parameters/unique_landuses.csv', halves_shp=halves_shp, building_intersections_shp=intersections, closest_building_intersections_shp=closest_intersections, embankment_shp=embankments_file)
 
 # embankment = gpd.read_file(embankments_file)
+# print(embankment.columns)
 # column_data = embankment[['geometry']]
 # column_data.to_csv('embankment_geometry.csv', index=False)
 # DEBUGGING
@@ -349,10 +556,25 @@ compute_values(points_shp="output/cross_sections/KanaalVanWalcheren/KanaalVanWal
 # selected_col = pts[['id', 'imperv']]
 # selected_col.to_csv("imperv.csv", index=False)
 # print(pts.head(1))
-metr = gpd.read_file("metric_test.shp")
+metr = gpd.read_file(metrics_output)
 # print(metr[['id', 'flood_rat', 'flood_mean', 'flood_max', 'flood_std']].head(1))
 # print(metr[['landuse_0', 'landuse_1', 'landuse_2', 'landuse_3', 'landuse_4','landuse_5','landuse_6']].head(1))
 # print(metr[['landuse_7','landuse_8','landuse_9','landuse_10','landuse_11','landuse_12','landuse_13']].head(1))
 # print(metr[['id', 'imperv']].tail(10))
-print(metr[['building', 'buil_heig', 'rs_wid', 'visible' , 'vis_layer']].tail(30))
+
+print(metr[['id','barriers', 'slope_flat','slope_pos','slope_neg','slope_mean', 'rs_wid']].head(100))
+max_value = metr['barriers'].max()
+average_value = metr['barriers'].mean()
+print(f"Max: {max_value}")
+print(f"Average: {average_value}")
+
+max_value_row = metr.loc[metr['barriers'] == metr['barriers'].max()]
+max_id = max_value_row['id'].values[0]  # Assuming 'id' is the column name
+max_side = max_value_row['side'].values[0]
+print(f"Max Value: {metr['barriers'].max()}")
+print(f"ID at Max: {max_id}")
+print(f"Side at Max: {max_side}")
+
+# ONLY IF YOU HAVE NAN FOR EVEYR COLUMN, IS IT A INVALID. ALDO WILL ONLY HAVE 1 ROW WITH THAT ID
+# i mean, there is one row with id 88, but two for id 1
 # metr.to_csv("metric_test.csv", index=False)
