@@ -105,22 +105,4 @@ for i, feature in enumerate(points_layer.getFeatures()):
         else:
             print(f"Viewshed output failed for point ID: {point_id}")
 
-        # Binary
-        # print(params.keys())
-        # viewshed_output_path = params['output']
-        # binary_output_path = f'C:/Users/susan/Documents/thesis/Thesis-terminal/output/visibility/KanaalVanWalcheren/binary/binary_viewshed_{point_id}.tif'
-        #
-        # # Reclassify to create binary output
-        # reclass_params = {
-        #     'INPUT_A': viewshed_output_path,  # Input raster A
-        #     'BAND_A': 1,  # Band number for input A
-        #     'FORMULA': 'A >= 1',  # Reclassification formula
-        #     'OUTPUT': binary_output_path,
-        #     'NO_DATA': None,
-        #     'RTYPE': 1,  # Output raster type (Byte/Int8)
-        #     'OPTIONS': ''
-        # }
-        #
-        # processing.run("gdal:rastercalculator", reclass_params)
-
 print("Batch process completed!")
