@@ -31,7 +31,7 @@ else:
 # else:
 #     print("River layer loaded successfully.")
 #
-# buffered_river_path = 'C:/Users/susan/Documents/thesis/Thesis-terminal/input/river/buffered_river.shp'
+# buffered_river_path = 'C:/Users/susan/Documents/thesis/Thesis-terminal/input/river/buffered_river_101.shp'
 # buffer_params = {
 #     'INPUT': river_layer,
 #     'DISTANCE': 101,
@@ -70,19 +70,24 @@ else:
 
 clipped_dem_path = 'C:/Users/susan/Documents/thesis/Thesis-terminal/input/AHN/KanaalVanWalcheren/DSM_test/merged_clipped.tif'
 dem_path = clipped_dem_path
+output_dir = 'C:/Users/susan/Documents/thesis/Thesis-terminal/output/visibility/KanaalVanWalcheren/viewsheds/'
+os.makedirs(output_dir, exist_ok=True)
+
+memory_mb = 10240 #for 16gb ram. use about 2048 for 8gb
+num_cores = 6
 
 # Loop through each point in the shapefile
 for i, feature in enumerate(points_layer.getFeatures()):
-    if i < 1 :
+    if i < 5 :
         river_width = feature['width']
-        print(f"river width before is {river_width}")
+        # print(f"river width before is {river_width}")
         if river_width == 0.0: #If width is zero, then there is no embankment points (only water)
             river_width = 200 #Default value for river width (cs width)
-        print(f"river width after is {river_width}")
+        # print(f"river width after is {river_width}")
         max_distance = 100 + 0.5 * river_width
         point_geom = feature.geometry().asPoint()  # Get the point's geometry as a coordinate (x, y)
         height = feature['height'] or 1.75 #if height value is None/NULL then we assign a default. Height is only None is we don't use the cross-section as it only contains water
-        print(f"river height is {height}")
+        # print(f"river height is {height}")
         print(f"Processing feature ID: {feature.id()} with height: {feature['height']}")
         point_id = feature.id()  # Get the ID of the point feature
 
@@ -93,9 +98,15 @@ for i, feature in enumerate(points_layer.getFeatures()):
             'max_distance': max_distance,  # Maximum visibility distance
             'observer_elevation': f'{height}',  # Observer height (adjust as needed)
             'target_elevation': 0,  # Target height (adjust if needed)
-            'output': f'C:/Users/susan/Documents/thesis/Thesis-terminal/output/visibility/KanaalVanWalcheren/viewsheds/viewshed_{point_id}.tif',
+            'output': f'{output_dir}viewshed_{point_id}_TEST.tif',
             # Output file path for each point
-            '-b': True
+            '-b': True, #boolean mode (0 not visible, 1 visible)
+            'memory': memory_mb,
+            'threads':num_cores,
+            'refraction_coeff': 0.14286,
+            'GRASS_REGION_CELLSIZE_PARAMETER': 1,
+            'GRASS_REGION_READ_MAP_OPTS': '-s',
+            'overwrite': True #prevent checking for existing files
         }
 
         # Run the r.viewshed tool
