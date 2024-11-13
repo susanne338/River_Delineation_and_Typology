@@ -1,5 +1,5 @@
 """
-
+Compute metric values for each cross-section
 """
 
 import geopandas as gpd
@@ -11,32 +11,8 @@ from scipy.ndimage import gaussian_gradient_magnitude
 from tqdm import tqdm
 from shapely.geometry import Point, LineString, Polygon
 
-# This gets the polygon of the river via the embankment points computed before
-# TODO: add embankment points at buffer or add that into this function cause now it skips
-def polygon_river(embankment_left, embankment_right, river_polygon_shapefile):
-    gdf_right = gpd.read_file(embankment_right)
-    gdf_left = gpd.read_file(embankment_left)
-    points_right = [Point(row['geometry'].x, row['geometry'].y) for index, row in gdf_right.iterrows()]
-    points_left = [Point(row['geometry'].x, row['geometry'].y) for index, row in gdf_left.iterrows()]
-    # points_right = sorted(points_right, key=lambda p: (p.x, p.y))
-    # points_left = sorted(points_left, key=lambda p: (p.x, p.y))
 
-    line_right = LineString(points_right)
-    line_left = LineString(points_left)
-    if line_right.coords[-1] != line_left.coords[0]:
-        line_right = LineString(list(reversed(line_right.coords)))
-
-    coords = list(line_right.coords) + list(line_left.coords)
-    print(f"coordinates {coords}")
-    polygon = Polygon(coords)
-    gdf_polygon = gpd.GeoDataFrame(geometry=[polygon])
-    gdf_polygon.set_crs(gdf_right.crs, allow_override=True, inplace=True)
-    gdf_polygon.to_file(river_polygon_shapefile)
-    return
-# polygon_river('output/metrics/embankment_points_left.shp', 'output/metrics/embankment_points_right.shp', 'output/metrics/river_polygon.shp')
-
-# METRIC VALUE COMPUTATION-------------------------------------------------------------------------
-# Midpoints shp contains columns FID, left, right, max, height, width, geometry
+# METRIC VALUE COMPUTATION FUNCTIONS----------------------------------------------------------------------------
 
 def compute_ratio_flood(group, column):
     total_points = len(group)
@@ -428,13 +404,11 @@ def analyze_slope_distribution(group, flat_threshold):
 
 
 # RUN-------------------------------------------------------------------------------------------------------------------
-def compute_values(points_shp, metric_shp, midpoints_shp, unique_landuse_csv, halves_shp, building_intersections_shp, closest_building_intersections_shp, embankment_shp):
+def compute_values(points_shp, metric_shp, midpoints_shp, unique_landuse_csv, building_intersections_shp, closest_building_intersections_shp, embankment_shp):
     parameters = gpd.read_file(points_shp)
     # Index(['id', 'h_distance', 'visible', 'imperv', 'elev_dtm', 'elev_dsm',
     #        'landuse', 'flood_dept', 'side', 'split_h_di', 'geometry'],
     #       dtype='object')
-    halves = gpd.read_file(halves_shp)
-    # columns: Index(['id', 'side', 'height1', 'build1', 'geometry'], dtype='object')
     building_intersections = gpd.read_file(building_intersections_shp)
     #  columns: Index(['id', 'side', 'geometry'], dtype='object')
     closest_building_intersections = gpd.read_file(closest_building_intersections_shp)
@@ -526,55 +500,20 @@ def compute_values(points_shp, metric_shp, midpoints_shp, unique_landuse_csv, ha
     return metrics
 
 
-
-
-midpoints_shp = "output/river/KanaalVanWalcheren/KanaalVanWalcheren_mid.shp"
+# Input files
 points_shp ="output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_test.shp"
-halves_shp = 'output/river/KanaalVanWalcheren/KanaalVanWalcheren_mid_halves.shp'
+embankments_file = "output/embankment/KanaalVanWalcheren/embankments.shp"
+midpoints_shp = "output/river/KanaalVanWalcheren/KanaalVanWalcheren_mid.shp"
 intersections = "output/buildings/KanaalVanWalcheren/building_intersections/building_intersections.shp"
 closest_intersections = "output/buildings/KanaalVanWalcheren/closest_building_intersections/closest_building_intersections.shp"
-embankments_file = "output/embankment/KanaalVanWalcheren/embankments.shp"
-metrics_output = "output/metrics/metrics/metrics.shp"
+unique_landuses = 'output/parameters/unique_landuses.csv'
 
-compute_values(points_shp="output/cross_sections/KanaalVanWalcheren/KanaalVanWalcheren_points_test.shp", metric_shp=metrics_output, midpoints_shp=midpoints_shp, unique_landuse_csv='output/parameters/unique_landuses.csv', halves_shp=halves_shp, building_intersections_shp=intersections, closest_building_intersections_shp=closest_intersections, embankment_shp=embankments_file)
+# output file
+metrics_output = "output/metrics/metrics/KanaalVanWalcheren/metrics.shp"
 
-# embankment = gpd.read_file(embankments_file)
-# print(embankment.columns)
-# column_data = embankment[['geometry']]
-# column_data.to_csv('embankment_geometry.csv', index=False)
-# DEBUGGING
-# midpts = gpd.read_file(midpoints_shp)
-# print(midpts.columns)
-# halves = gpd.read_file(halves_shp)
-# print((halves.columns))
-# points = gpd.read_file(points_shp)
-# print(f"points columnc \n {points.columns}")
-# intersections = gpd.read_file(intersections)
-# Assuming 'gdf' is your GeoDataFrame and 'your_column_name' is the column you're checking
+# Run
+compute_values(points_shp=points_shp, metric_shp=metrics_output, midpoints_shp=midpoints_shp, unique_landuse_csv= unique_landuses, building_intersections_shp=intersections, closest_building_intersections_shp=closest_intersections, embankment_shp=embankments_file)
 
-# pts = gpd.read_file(points)
-# selected_col = pts[['id', 'imperv']]
-# selected_col.to_csv("imperv.csv", index=False)
-# print(pts.head(1))
-metr = gpd.read_file(metrics_output)
-# print(metr[['id', 'flood_rat', 'flood_mean', 'flood_max', 'flood_std']].head(1))
-# print(metr[['landuse_0', 'landuse_1', 'landuse_2', 'landuse_3', 'landuse_4','landuse_5','landuse_6']].head(1))
-# print(metr[['landuse_7','landuse_8','landuse_9','landuse_10','landuse_11','landuse_12','landuse_13']].head(1))
-# print(metr[['id', 'imperv']].tail(10))
-
-print(metr[['id','barriers', 'slope_flat','slope_pos','slope_neg','slope_mean', 'rs_wid']].head(100))
-max_value = metr['barriers'].max()
-average_value = metr['barriers'].mean()
-print(f"Max: {max_value}")
-print(f"Average: {average_value}")
-
-max_value_row = metr.loc[metr['barriers'] == metr['barriers'].max()]
-max_id = max_value_row['id'].values[0]  # Assuming 'id' is the column name
-max_side = max_value_row['side'].values[0]
-print(f"Max Value: {metr['barriers'].max()}")
-print(f"ID at Max: {max_id}")
-print(f"Side at Max: {max_side}")
-
-# ONLY IF YOU HAVE NAN FOR EVEYR COLUMN, IS IT A INVALID. ALDO WILL ONLY HAVE 1 ROW WITH THAT ID
-# i mean, there is one row with id 88, but two for id 1
-# metr.to_csv("metric_test.csv", index=False)
+# DEBUG CHECK
+# metr = gpd.read_file(metrics_output)
+# print(metr[['id','barriers', 'slope_flat','slope_pos','slope_neg','slope_mean', 'rs_wid']].head(100))
