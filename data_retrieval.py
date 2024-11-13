@@ -1,28 +1,14 @@
 """
-data retrieval
+Data retrieval script for river, AHN and 3DBAG data. To run this script, first download the needed JSON and
+.fgb file for tile indices for AHN and 3DBAG.
 
-AHN: via WFS request for bbox, and tie download of .tif files.
-TODO: merge function does not work.
-TODO: Nodata. values -246 is given now. Later these are removed, but I need to keep the points somehow, and check for water and building. Maybe check for height at DSM?
-TODO: I think wcs url for DSM did not work. Alter so it takes tiles.
+
 OSM: via overpy api.
-TODO: tags
-3DBAG: via WFS request
-
+AHN: via WFS request via JSON file
+3DBAG: via WFS request via .fgb file
 """
-import datetime
-from owslib.wcs import WebCoverageService
-import rasterio
-from rasterio.io import MemoryFile
-import numpy as np
+
 import json
-import requests
-from shapely.geometry import Polygon, box
-import os
-import geopandas as gpd
-import glob
-from rasterio.merge import merge
-import sys
 import overpy
 from shapely.geometry import LineString, Polygon
 import requests
@@ -102,204 +88,14 @@ def fetch_river_overpass(river_name, output_file):
 
 
 # Example usage
-fetch_river_overpass("Maas", "input/river/maas.shp")
-
-
-
-
-
+# fetch_river_overpass("Maas", "input/river/maas/maas.shp")
 
 # AHN DATA RETRIEVAL----------------------------------------------------------------------------------------------------
-# VIA WFS REQUEST FOR A BOUNDING BOX: CAN'T BE DONE FOR WHOLE AREA CAUSE AREA IS TOO BIG
-def fetch_AHN_data_bbox(wcs_url, bbox, TIFfilename, TIFfilename_modified):
-    """
 
-    :param wcs_url:
-    :param bbox:
-    :return: elevation numpy.ndarray in BBOX from AHN wth nodata as -246
-    """
-    # Connect to the WCS service
-    wcs = WebCoverageService(wcs_url, version='1.0.0')
-
-    # # Get information about the available layers
-    # print(list(wcs.contents))
-
-    # List all available layers
-    # print("Available layers:")
-    # for layer in wcs.contents:
-    #     print(layer)  # Print the layer name
-
-    layer = '54e1e21c-50fe-42a4-b9fb-1f25ccb199af'
-
-    # Get layer metadata
-    # layer_info = wcs.contents[layer]
-    # print(layer_info)
-
-    # Set the timestamp (e.g., use the most recent date)
-    # Use this timestamp when using elipse drive DTM
-    timestamp = datetime.datetime.now().strftime('%Y-%m-%d')
-    # Use this timestamp when using elipse drive wcs for DSM 1.1.1
-    # timestamp = '2023-04-14'
-    print(f"Using timestamp: {timestamp}", 'and type ', type(timestamp))
-
-
-    # Making the bbox slightly larger to avoid issues when extracting elevation for cross-section
-    min_x, min_y, max_x, max_y = bbox
-    min_x = min_x * 0.99999
-    min_y = min_y * 0.99999
-    max_x = max_x * 1.00001
-    max_y = max_y * 1.00001
-    bbox_dem = (min_x, min_y, max_x, max_y)
-
-    # Calculate the width and height of the bounding box
-    # bbox_width = bbox[2] - bbox[0]  # xmax - xmin
-    # bbox_height = bbox[3] - bbox[1]  # ymax - ymin
-    bbox_width = max_x - min_x
-    bbox_height = max_y - min_y
-    # print(f"Bounding Box Width (in units): {bbox_width}")
-    # print(f"Bounding Box Height (in units): {bbox_height}")
-
-    # Fetch correct resolution
-    desired_resolution = 0.5  # meters/pixel
-    width_pixels = max(1, int(bbox_width / desired_resolution))
-    height_pixels = max(1, int(bbox_height / desired_resolution))
-    # print(f"Bounding Box Width (in pixels): {width_pixels}")
-    # print(f"Bounding Box Height (in pixels): {height_pixels}")
-
-    # Request the raster data for this area
-    response = wcs.getCoverage(
-        identifier=layer,
-        bbox=bbox,
-        crs='EPSG:28992',
-        srs='EPSG:28992',
-        format='geotiff',
-        width=width_pixels,
-        height=height_pixels,
-        time=timestamp
-    )
-    print('Response content: ', response)
-    # Read the data into a NumPy array
-    with MemoryFile(response.read()) as memfile:
-        with memfile.open() as dataset:
-            elevation_data = dataset.read(1)  # Read the first band into a NumPy array
-
-    # print('elevation data before ', elevation_data)
-    # Replace NoData values (0) with -246
-    elevation_data[elevation_data == 0] = -246
-
-    # print('elevation data ', elevation_data)
-
-    # Save the response as a .tif file
-    with open(TIFfilename, 'wb') as f:
-        f.write(response.read())
-
-    # Open the input TIFF file
-    with rasterio.open(TIFfilename) as src:
-        # Retrieve the metadata
-        metadata = src.meta
-
-        # Print the NoData value for each band
-        for band in range(1, src.count + 1):
-            nodata_value = src.nodata  # Get the NoData value for the dataset
-            # print(f"Band {band}: NoData value = {nodata_value}")
-        # Read the number of bands
-        # band_count = src.count
-        # print('band count ', band_count)
-        # Read the data
-        data = src.read(1)  # Read the first band
-        # print('data and type ', data, data.dtype)
-        # # Ensure the data type is float32 for proper handling
-        # if data.dtype != np.float32:
-        #     data = data.astype(np.float32)
-
-        # Create a mask for the NoData values (which are currently None and 0 in qgis)
-        no_data_mask = (data == 0)
-        # Print mask for debugging
-        # print("NoData Mask:\n", no_data_mask)
-
-        # # Change NoData values from 0 to -246
-        # data[no_data_mask] = -246.0
-        # Use np.where to replace NoData values with -246
-        data = np.where(no_data_mask, -246, data)
-        # print('data ', data)
-
-        # Update the metadata for the new output
-        metadata = src.meta.copy()
-        metadata.update({
-            'dtype': 'float32',
-            'nodata': -246,
-        })
-
-    # Write the modified data to a new TIFF file
-    with rasterio.open(TIFfilename_modified, 'w', **metadata) as dst:
-        dst.write(data, 1)  # Write the modified data back to the first band
-
-    # print("NoData values have been updated successfully!")
-    return elevation_data, bbox_dem
-
-
-# fetch_AHN_data_bbox(wcs_url, bbox)
-
-def extract_elevation(elevation_data, points, bbox):
-    """
-    Extract elevation values from the elevation data for specified points.
-
-    Parameters:
-    - elevation_data (numpy.ndarray): 2D array of elevation data.
-    - points (list of tuples): List of (x, y) coordinates for which to extract elevation.
-    - bbox (tuple): The bounding box coordinates (min_x, min_y, max_x, max_y) of the cross-section
-
-    Returns:
-    - elevations (list): Elevation values at the specified points.
-    """
-
-    min_x, min_y, max_x, max_y = bbox
-    elevations = []
-
-    # Calculate pixel size
-    pixel_size_x = (max_x - min_x) / elevation_data.shape[1]
-    pixel_size_y = (max_y - min_y) / elevation_data.shape[0]
-
-    for point in points:
-        x, y = point
-        # print('point ! and bbox stff ', point, bbox)
-
-        # Check if the point is within the bounding box
-        tolerance = 1e-5
-        if (min_x - tolerance <= x <= max_x + tolerance) and (min_y - tolerance <= y <= max_y + tolerance):
-            # Calculate pixel coordinates
-            pixel_x = int((x - min_x) / pixel_size_x)
-            pixel_y = int((y - min_y) / pixel_size_y)
-
-            # Check bounds to avoid index errors
-            if 0 <= pixel_x < elevation_data.shape[1] and 0 <= pixel_y < elevation_data.shape[0]:
-                elevation_value = elevation_data[pixel_y, pixel_x]  # Note: pixel_y comes first in row-major order
-                elevations.append(elevation_value)
-            else:
-                # print('the point is NOT within the bounding box')
-                # print('point ! and bbox stff ', point, bbox)
-                elevations.append(None)  # Out of bounds
-        else:
-            # print('the point is NOT within the bounding box')
-            # print('point ! and bbox stff ', point, bbox)
-            elevations.append(None)  # Outside the bbox
-
-    return elevations
-
-
-# VIA TILE DOWNLOAD USING A .json FILE FOR TILE INDICES
-# json files need to be dowloaded and are in needed_files folder
 def load_json(json_path):
     with open(json_path, 'r') as file:
         data = json.load(file)
     return data
-
-
-def tile_intersects(tile_coords, bbox):
-    tile_polygon = Polygon(tile_coords)
-    print(f"tile polygon {tile_polygon}")
-    bbox_polygon = box(*bbox)  # Create a Polygon for the bounding box
-    return tile_polygon.intersects(bbox_polygon)
 
 
 def download_AHN_tile(url, destination_folder, filename):
@@ -334,8 +130,10 @@ def download_AHN_tiles(json_path, river_file, destination_folder):
         tile_url = feature['properties']['url']  # DSM tile URL
         tile_name = feature['properties']['name']  # Filename
 
-        # Check if the tile intersects with the bounding box
-        if tile_intersects(tile_coords, buffered_area.bounds):
+        tile_polygon = Polygon(tile_coords)
+                # Check if the tile intersects with the bounding box
+        if tile_polygon.intersects(buffered_area):
+            # if tile_intersects(tile_coords, buffered_area.bounds):
 
             file_path = os.path.join(destination_folder, tile_name)
             if os.path.exists(file_path):
@@ -346,74 +144,32 @@ def download_AHN_tiles(json_path, river_file, destination_folder):
             # Download the tile
             download_AHN_tile(tile_url, destination_folder, tile_name)
         else:
-            print(f"Tile {tile_name} does not intersect with the bounding box.")
+            print(f"Tile {tile_name} does not intersect with the buffer.")
+
+        # file_path_delete = os.path.join(destination_folder, tile_name)
+        # if os.path.exists(file_path_delete):
+        #     if not tile_polygon.intersects(buffered_area):
+        #         # If it does not intersect with the buffered area, delete the file
+        #         os.remove(file_path_delete)
+        #         print(f"Deleted tile {tile_name} as it does not intersect with the buffer.")
+        #     else:
+        #         print(f"Tile {tile_name} intersects with the buffer, keeping it.")
 
 
-river='input/river/longest_river.shp'
-json_path = 'input/AHN/kaartbladindex_AHN_DSM.json'
-destination_folder = 'input/AHN/KanaalVanWalcheren/DSM_test'
-download_AHN_tiles(json_path,river, destination_folder)
+"""
+download_ahn_tiles fetches the tiles that intersect with the buffered river using the tile indices
+and the url in the JSON files that need to be downloaded beforehand. 
+"""
 
-import geopandas as gpd
 
-# CHECKING MAAS. THERE ARE 66 LINES
-# gdf = gpd.read_file("input/river/maas.shp")
-# # Check if the geometries are LineString or MultiLineString
-# # If you have MultiLineString, we will split them into individual LineStrings
-# all_lines = []
-# for geom in gdf.geometry:
-#     if geom.geom_type == 'MultiLineString':
-#         all_lines.extend(list(geom.geoms))  # Split into individual LineStrings
-#     elif geom.geom_type == 'LineString':
-#         all_lines.append(geom)  # Add LineString directly
-# # Calculate and print lengths
-# for i, line in enumerate(all_lines):
-#     length = line.length
-#     print(f"Line {i + 1}: Length = {length}")
+# JSON paths
+json_path_dsm = 'input/AHN/kaartbladindex_AHN_DSM.json'
+json_path_dtm = 'input/AHN/kaartbladindex_AHN_DTM.json'
 
-# MERGE tif files DOESNT WORK
-def merge_tiles(combined_tiles, folder_of_tiles):
-    """
-    :param combined_tiles: file output
-    :param folder_of_tiles: folder that contains the tiles to be merged
-    :param nodata_value:
-    :return:
-    """
-
-    tif_files = glob.glob(os.path.join(folder_of_tiles, '*.tif'))
-    print('tif files ', tif_files)
-
-    src_files_to_mosaic = []
-    for tif_file in tif_files:
-        src = rasterio.open(tif_file)
-        src_files_to_mosaic.append(src)
-    # Sources (list) is the sequence of dataset objects opened in r mode or path-like objects
-    mosaic, out_transform = merge(src_files_to_mosaic)
-
-    out_meta = src_files_to_mosaic[0].meta.copy()
-    print('meta ', out_meta)
-
-    out_meta.update({
-        "driver": "GTiff",
-        "height": mosaic.shape[1],
-        "width": mosaic.shape[2],
-        "transform": out_transform
-        # "nodata": nodata_value,
-        # "dtype": "float32"
-    })
-
-    with rasterio.open(combined_tiles, "w", **out_meta) as dest:
-        dest.write(mosaic)
-    for src in src_files_to_mosaic:
-        print(f"File: {src.name}, Nodata Value: {src.nodata}")
-        src.close()
-    print(f"Merged TIF saved to {combined_tiles}")
-
-# this checks the nodata value of a file and says 3.4028234663852886e+38 for R_65AZ2.tif and None for clipper_total.tif
-# with rasterio.open('thesis_output/AHN_tiles_DSM/clipped_total.tif') as src:
-#     nodata_value = src.nodata  # Get the NoData value
-#     print(f"NoData value: {nodata_value}")
-
+# Change these paths to correct river and destination folder
+river='input/river/maas/maas.shp'
+destination_folder= 'input/AHN/Maas/DSM'
+# download_AHN_tiles(json_path,river, destination_folder)
 
 
 
@@ -447,7 +203,7 @@ def fetch_3DBAG_tiles(fgb_path, buffer, river_gdf, output_folder, target_crs='EP
         gpkg_download = row['gpkg_download']  # this is the download link
         tile_id = tile_id.replace('/', '-')
         # print("tile id ", tile_id)
-        print("gpkg download ", gpkg_download)
+        # print("gpkg download ", gpkg_download)
         download_url = gpkg_download
         # download_url = f"https://3dbag.nl/en/download?tid={tile_id}"
         # download_url = f"https://data.3dbag.nl/v20240420/tiles/9/284/556/{tile_id}.gpkg"
@@ -607,14 +363,22 @@ def combine_geotiles(input_folder, output_file):
 
     print(f"All layers combined and saved to {output_file}")
 
-wfs_url = 'https://data.3dbag.nl/api/BAG3D/wfs?request=getcapabilities'
-buffer = 100  # Area around river so that there is some extra space for sure taken into account
+
+"""
+3DBAG data retrieval is done via the .fgb file specifying the tile indices and url
+"""
+
+
+# buffer and path
+buffer = 101  # Area around river so that there is some extra space for sure taken into account
 tile_index_path = 'thesis_output/needed_files/tile_index.fgb' #fgb file from 3DBAG with dimensions of tiles
+
+# Change these paths to correct river and destination folder
 tiles_folder = 'input/3DBAG/maas/tiles' #output folder for my retrieved tiles
-gdf_river = gpd.read_file('input/river/maas.shp') #shapefile of my river in NL
-output_file = 'input/3DBAG/maas/combined_3DBAG_tiles_DTM.gpkg' #File to write all tiles combined to
+gdf_river = gpd.read_file('input/river/maas/maas.shp') #shapefile of my river in NL
+output_file = 'input/3DBAG/maas/combined_tiles/combined.gpkg' #File to write all tiles combined to
 
 # EXECUTE SCRIPT TO GET ALL TILES
-# fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
-# combine_geotiles(tiles_folder, output_file)
+fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
+combine_geotiles(tiles_folder, output_file)
 
