@@ -90,6 +90,21 @@ def fetch_river_overpass(river_name, output_file):
 # Example usage
 # fetch_river_overpass("Maas", "input/river/maas/maas.shp")
 
+def select_subrivers(river_shp, subrivers_list, river_output_shp):
+    river = gpd.read_file(river_shp)
+    selected_rivers = river[river['FID'].isin(subrivers_list)]
+    selected_rivers.to_file(river_output_shp)
+
+river = "input/river/maas/maas.shp"
+
+subrivers_maas_roermond = [10, 37, 6]
+river_roermond = "input/river/maas/roermond.shp"
+subrivers_maas_venlo = [7, 28, 27, 34]
+river_venlo = "input/river/maas/venlo.shp"
+subrivers_maas_cuijk = [64, 9, 18]
+river_cuijk = "input/river/maas/cuijk.shp"
+
+# select_subrivers(river, subrivers_maas_cuijk,river_cuijk)
 # AHN DATA RETRIEVAL----------------------------------------------------------------------------------------------------
 
 def load_json(json_path):
@@ -168,8 +183,8 @@ json_path_dtm = 'input/AHN/kaartbladindex_AHN_DTM.json'
 
 # Change these paths to correct river and destination folder
 river='input/river/maas/maas.shp'
-destination_folder= 'input/AHN/Maas/DSM'
-# download_AHN_tiles(json_path,river, destination_folder)
+destination_folder= 'input/AHN/Maas/DTM'
+# download_AHN_tiles(json_path_dtm,river, destination_folder)
 
 
 
@@ -379,6 +394,6 @@ gdf_river = gpd.read_file('input/river/maas/maas.shp') #shapefile of my river in
 output_file = 'input/3DBAG/maas/combined_tiles/combined.gpkg' #File to write all tiles combined to
 
 # EXECUTE SCRIPT TO GET ALL TILES
-fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
-combine_geotiles(tiles_folder, output_file)
+# fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
+# combine_geotiles(tiles_folder, output_file)
 
