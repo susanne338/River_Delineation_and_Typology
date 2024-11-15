@@ -8,22 +8,29 @@ AHN: via WFS request via JSON file
 3DBAG: via WFS request via .fgb file
 """
 
-import json
+
 import overpy
 from shapely.geometry import LineString, Polygon
-import requests
 from shapely.geometry import box
-import geopandas as gpd
 import pandas as pd
 import fiona
 import os
 import gzip
 import shutil
 from tqdm import tqdm
+import geopandas as gpd
+import requests
+import json
+import time
+import os
+from urllib.parse import urlparse
+import zipfile
+
 
 
 # OSM RIVER-------------------------------------------------------------------------------------------------------------
-def fetch_river_overpass(river_name, output_file):
+# to fetch, change tags in function
+def fetch_river_overpass(river_name ,type, relation,  output_file):
     """
     :param river_name:
     :param output_file:
@@ -48,10 +55,11 @@ def fetch_river_overpass(river_name, output_file):
     query = f"""
         [out:json];
         (
-          way["waterway"="river"]["name"="{river_name}"];
+          way["waterway"={type}]["name"="{river_name}"];
         );
         out body;
         """
+
 
     result = api.query(query)
 
@@ -88,23 +96,32 @@ def fetch_river_overpass(river_name, output_file):
 
 
 # Example usage
-# fetch_river_overpass("Maas", "input/river/maas/maas.shp")
-
+# fetch_river_overpass('Waal', 'river', '2675569','input/river/waal/waal.shp')
 def select_subrivers(river_shp, subrivers_list, river_output_shp):
     river = gpd.read_file(river_shp)
     selected_rivers = river[river['FID'].isin(subrivers_list)]
     selected_rivers.to_file(river_output_shp)
 
-river = "input/river/maas/maas.shp"
+
 
 subrivers_maas_roermond = [10, 37, 6]
-river_roermond = "input/river/maas/roermond.shp"
 subrivers_maas_venlo = [7, 28, 27, 34]
-river_venlo = "input/river/maas/venlo.shp"
 subrivers_maas_cuijk = [64, 9, 18]
-river_cuijk = "input/river/maas/cuijk.shp"
+subrivers_maas_maastricht = [2, 5]
+subrivers_ar_amsterdam = [0]
+subrivers_ar_utrecht = [27, 25]
+subrivers_ijssel_zwolle_deventer = [0]
+subrivers_lek = [2]
+subrivers_vliet = [0, 5, 4, 11, 10, 6, 3]
+subrivers_schie = [0]
+subrivers_winschoterdiep = [0, 1, 2]
+subrivers_harinx = [1, 6, 4, 11, 12, 2]
+subrivers_nijmegen = [12,13,23]
+subrivers_zaltbommel = [14]
 
-# select_subrivers(river, subrivers_maas_cuijk,river_cuijk)
+river = 'input/river/maas/maas.shp'
+river_maastricht = 'input/river/maas/maastricht/maastricht.shp'
+# select_subrivers(river, subrivers_maas_maastricht, river_maastricht)
 # AHN DATA RETRIEVAL----------------------------------------------------------------------------------------------------
 
 def load_json(json_path):
@@ -182,11 +199,39 @@ json_path_dsm = 'input/AHN/kaartbladindex_AHN_DSM.json'
 json_path_dtm = 'input/AHN/kaartbladindex_AHN_DTM.json'
 
 # Change these paths to correct river and destination folder
-river='input/river/maas/maas.shp'
-destination_folder= 'input/AHN/Maas/DTM'
-# download_AHN_tiles(json_path_dtm,river, destination_folder)
+main_rivers = ['ijssel', 'waal']
+cities = [['deventer'], ['nijmegen','zaltbommel']]
 
 
+
+lonely_rivers = ['BovenMark', 'Harinxmakanaal', 'lek', 'vliet', 'Winschoterdiep']
+lonelier_rivers = ['RijnSchieKanaal', 'Schie', ]
+def ahn_for_loneliness(rivers):
+    for river in rivers:
+        print(river)
+        file = f'input/river/{river}/{river}.shp'
+        dsm_folder = f"input/AHN/{river}/DSM"
+        os.makedirs(dsm_folder, exist_ok=True)
+        dtm_folder = f"input/AHN/{river}/DTM"
+        os.makedirs(dtm_folder, exist_ok=True)
+        download_AHN_tiles(json_path_dsm, file, dsm_folder)
+        download_AHN_tiles(json_path_dtm, file, dtm_folder)
+def ahn_data(cities, main_river):
+    for city in cities:
+        river=f'input/river/{main_river}/{city}/{city}.shp'
+        destination_folder_dsm= f'input/AHN/{main_river}/{city}/DSM'
+        os.makedirs(destination_folder_dsm, exist_ok=True)
+        destination_folder_dtm = f'input/AHN/{main_river}/{city}/DTM'
+        os.makedirs(destination_folder_dtm, exist_ok=True)
+
+        download_AHN_tiles(json_path_dsm,river, destination_folder_dsm)
+        download_AHN_tiles(json_path_dtm, river , destination_folder_dtm)
+
+# ahn_data(cities, main_river)
+for idx, main_river in enumerate(main_rivers):
+    ahn_data(cities[idx], main_river)
+
+ahn_for_loneliness(lonelier_rivers)
 
 # 3DBAG-----------------------------------------------------------------------------------------------------------------
 def fetch_3DBAG_tiles(fgb_path, buffer, river_gdf, output_folder, target_crs='EPSG:28992'):
@@ -397,3 +442,135 @@ output_file = 'input/3DBAG/maas/combined_tiles/combined.gpkg' #File to write all
 # fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
 # combine_geotiles(tiles_folder, output_file)
 
+# BGT--------------------------------------------------------------------------------------------------
+def download_bgt_data(river, shapefile_path, output_dir, buffer_distance=100):
+    try:
+        # Read and buffer the shapefile
+        gdf = gpd.read_file(shapefile_path)
+        buffered_gdf = gdf.buffer(buffer_distance)
+        buffered_union = buffered_gdf.unary_union
+        wkt_polygon = buffered_union.wkt
+
+        # API configuration
+        api_url = "https://api.pdok.nl/lv/bgt/download/v1_0"
+        api_url_p = urlparse(api_url)
+        base_url = f"{api_url_p.scheme}://{api_url_p.netloc}"
+        full_custom_url = f"{api_url}/full/custom"
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+
+        # Feature types from your original function
+        featuretypes = [
+            "bak", "begroeidterreindeel", "bord", "buurt", "functioneelgebied",
+            "gebouwinstallatie", "installatie", "kast", "kunstwerkdeel", "mast",
+            "onbegroeidterreindeel", "ondersteunendwaterdeel", "ondersteunendwegdeel",
+            "ongeclassificeerdobject", "openbareruimte", "openbareruimtelabel",
+            "overbruggingsdeel", "overigbouwwerk", "overigescheiding", "paal",
+            "pand", "plaatsbepalingspunt", "put", "scheiding", "sensor", "spoor",
+            "stadsdeel", "straatmeubilair", "tunneldeel", "vegetatieobject",
+            "waterdeel", "waterinrichtingselement", "waterschap", "wegdeel",
+            "weginrichtingselement", "wijk"
+        ]
+
+        # Prepare request data - using 'gmllight' format
+        data = {
+            "featuretypes": featuretypes,
+            "format": "gmllight",
+            "geofilter": wkt_polygon
+        }
+
+        # Submit initial request
+        print("Submitting download request...")
+        response = requests.post(
+            full_custom_url,
+            headers=headers,
+            data=json.dumps(data)
+        )
+
+        if response.status_code != 202:
+            print(f"Error creating custom download: {response.status_code} - {response.text}")
+            print(f"Response content: {response.text}")
+            return None
+
+        # Get request ID and status URL
+        response_object = response.json()
+        status_path = response_object["_links"]["status"]["href"]
+        download_request_id = response_object["downloadRequestId"]
+        status_url = f"{base_url}{status_path}"
+
+        # Poll for completion
+        while True:
+            response = requests.get(status_url)
+            status_object = response.json()
+            status = status_object["status"]
+            print(f"Status: {status}")
+
+            if status == "COMPLETED":
+                download_path = status_object["_links"]["download"]["href"]
+                download_url = f"{base_url}{download_path}"
+                break
+            elif status == "PENDING":
+                print(f"Progress: {status_object.get('progress', 'unknown')}%")
+            elif status == "FAILED":
+                print("Download request failed")
+                print(f"Status response: {status_object}")
+                return None
+
+            time.sleep(10)
+
+        # Download and extract the zip file
+        if download_url:
+            # Create output directory
+            # output_dir = os.path.dirname(output_bgt)
+            # os.mkdir(output_bgt, exist_ok=True)
+            zip_path = os.path.join(output_dir, f"{river}.zip")
+            extract_dir = os.path.join(output_dir, f"{river}")
+
+            # Download zip file
+            print(f"Downloading file to {zip_path}")
+            response = requests.get(download_url)
+            with open(zip_path, "wb") as f:
+                f.write(response.content)
+
+            # Extract zip file
+            print(f"Extracting files to {extract_dir}")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+
+            # Remove zip file after extraction
+            os.remove(zip_path)
+
+            print("Download and extraction completed successfully")
+            return extract_dir
+
+        return None
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None
+
+# Run by looping over all rivers
+lonely_rivers = ['lek', 'RijnSchieKanaal', 'schie', 'vliet']
+main_rivers = ['waal', 'ar']
+their_cities = [['nijmegen'], ['amsterdam']]
+# for idx, main in enumerate(main_rivers):
+#     for city in their_cities[idx]:
+#         river_shp = f"input/river/{main}/{city}/{city}.shp"
+#         output_bgt = f"input/BGT"
+
+# for river in lonely_rivers:
+#     river_shp = f"input/river/{river}/{river}.shp"
+#     output_bgt = f"input/BGT"
+    # os.mkdir(output_bgt, exist_ok=True)
+    #     result = download_bgt_data(city, river_shp, output_bgt)
+    #     if result:
+    #         print(f"Data extracted to: {result}")
+    #         # Print list of downloaded files
+    #         for file in os.listdir(result):
+    #             if file.endswith('.gml'):
+    #                 print(f"- {file}")
+    #     else:
+    #         print("Download failed")
