@@ -5,7 +5,7 @@ INPUT:
 river and city names, river shapefile.
 
 
-This script performs preprocess
+This script performs preprocess:
 1. download dtm files
 2. Compute wide cross-sections and points
 3. Adds elevation to the dataframe elev_dtm
@@ -23,37 +23,29 @@ points of each segment
 """
 import math
 import os
-from itertools import islice
-
-import fiona
-import pyproj
 import rasterio
 import pandas as pd
 import statistics
-from rasterio.transform import rowcol
-from shapely import MultiLineString, Polygon, MultiPolygon
 from tqdm import tqdm
 from rasterio.windows import from_bounds
 import geopandas as gpd
 from shapely.geometry import LineString, Point
 import numpy as np
-from shapely.geometry import Point, box
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from data_retrieval import load_json, download_AHN_tile, download_AHN_tiles
-# TODO: i changed cross_section_extraction to try
 
 # Get cross_sections intersecting with river---------------------------------------------------------------------------
-
-
 def cross_section_extraction(river_file, interval, width, output_file_cs, output_river_mid):
     """
-    Get cross-sections
-    :param output_file_cs: output shapefile for all cross-sections
-    :param width: width of total cross-section
-    :param interval: width between cross-sections
-    :param river: River geodataframe
-    :param output_river_mid: Output file for river midpoints
-    :return: gdf
+
+    Args:
+        river_file: shapefile path of river
+        interval: distance between segments
+        width: width of segment
+        output_file_cs: file path to write cross-sections to
+        output_river_mid: file path to write midpoints to
+
+    Returns: cross-sections shapefile, midpoints shapefile
+
     """
     river = gpd.read_file(river_file)
     projected_gdf = river.to_crs(epsg=28992)
@@ -93,9 +85,15 @@ def cross_section_extraction(river_file, interval, width, output_file_cs, output
 
 def get_perpendicular_cross_section(line, distance_along_line, width):
     """
-    Generates a cross-Section perpendicular to a riverline at a given distance along the line.
+
+    Args:
+        line: LineString of river
+        distance_along_line: Position on river we are at
+        width: Desired width of cross-section
+
+    Returns: LineString containing cross-section, midpoint of cross-section
+
     """
-    # Get the first point (at distance_along_line)
     point_on_line = line.interpolate(distance_along_line)  # Interpolated point on the riverline
 
     # Get another point slightly ahead for tangent calculation
@@ -126,15 +124,14 @@ def get_perpendicular_cross_section(line, distance_along_line, width):
 # Get points along cross-section, and h_distance. Add elevation to each point from DTM----------------------------------
 def create_cross_section_points(cross_sections_shapefile, width, output_shapefile):
     """
-    Creates points along cross-sections and calculates horizontal distances.
 
-    Parameters:
-    cross_sections_shapefile: Path to shapefile containing cross-section lines
-    n_points: Number of points to create along each cross-section
-    output_shapefile: Path where the resulting points shapefile will be saved
+    Args:
+        cross_sections_shapefile: Path to shapefile containging cross-section lines
+        width: widht of crossesction. Used to determine number of points along lines. Points are seperated by 0.5m
+        output_shapefile: Path where the resulting points shapefile will be saved
 
-    Returns:
-    GeoDataFrame containing points with horizontal distances
+    Returns: GeoDataFrame containing points with h_distance
+
     """
     # Read cross-sections from shapefile
     cross_sections = gpd.read_file(cross_sections_shapefile)
@@ -196,7 +193,7 @@ def add_elevation_from_tiles(shapefile_path, tiles_folder, elevation_column_name
     elevation_column_name: Name of the column to store elevation values
 
     Returns:
-    GeoDataFrame with added elevation column and count of missing points
+    GeoDataFrame with added elevation column. Prints count of missing points
     """
     # Read existing shapefile
     points_gdf = gpd.read_file(shapefile_path)
@@ -264,9 +261,10 @@ def extract_max_elevation_values(points, midpoints_file,
     This max value is then added up with user_defined_height.
     Takes embankment h_dist and selects max, multiplies this my 2, then add this as 'width' to add to radius in viewshed analysis
     Args:
-        shapefile: points shapefile
+        shapefile: points shapefile path
         midpoints_file: cross-section midpoint file that is altered
         user_defined_height: viewpoint height to perform viewshed analysis from
+        embankments_shp: path to file to write embankment points to
 
     Returns: saves values left, right (embankment), max, and (viewpoint) height to midpoints_file
     TODO: now when the river extend my buffer, no boundary point gets added. Fix to edge of buffer, or last point
@@ -381,6 +379,18 @@ def extract_max_elevation_values(points, midpoints_file,
 
 
 def cut_segment(embankments_shp, points_shp, pts_outputfile, cs_outputfile, segment_width):
+    """
+    Cuts of ends longer than 100m from embankement
+    Args:
+        embankments_shp:
+        points_shp:
+        pts_outputfile:
+        cs_outputfile:
+        segment_width:
+
+    Returns:
+
+    """
     embankment = gpd.read_file(embankments_shp)
     points = gpd.read_file(points_shp)
 
@@ -426,11 +436,20 @@ def cut_segment(embankments_shp, points_shp, pts_outputfile, cs_outputfile, segm
 
 
 def run_preprocess(river, city):
+    """
+    Runs functions in this script
+    Args:
+        river: string
+        city: string
+
+    Returns:
+
+    """
     river_file = f'input/river/{river}/{city}/{city}.shp'
 
     # PARAMETERS
     interval = 100
-    width_preprocess = 700
+    width_preprocess = 700 #river can be 450 meters wide
     user_defined_height = 1.75
     width_segment = 100
 
@@ -460,6 +479,9 @@ def run_preprocess(river, city):
     cut_segment(embankments_file, pts_preprocess, pts_final, cs_final, width_segment)
 
 
+"""
+Run the preprocess-----------------------------------------------------------------------------------------------------
+"""
 
 river = 'dommel'
 city = 'eindhoven'
