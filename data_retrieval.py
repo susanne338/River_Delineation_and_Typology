@@ -30,7 +30,7 @@ import zipfile
 
 # OSM RIVER-------------------------------------------------------------------------------------------------------------
 # to fetch, change tags in function
-def fetch_river_overpass(river_name ,type, relation,  output_file):
+def fetch_river_overpass(river_name ,type, output_file):
     """
     :param river_name:
     :param output_file:
@@ -95,15 +95,20 @@ def fetch_river_overpass(river_name ,type, relation,  output_file):
         print(f"No data found for {river_name}")
 
 
-# Example usage
-# fetch_river_overpass('Waal', 'river', '2675569','input/river/waal/waal.shp')
+# execute
+# river = 'dommel'
+# os.makedirs(f"input/river/{river}", exist_ok=True)
+# river_shp = f"input/river/{river}/{river}.shp"
+# fetch_river_overpass('Dommel', 'river', river_shp)
+
 def select_subrivers(river_shp, subrivers_list, river_output_shp):
     river = gpd.read_file(river_shp)
     selected_rivers = river[river['FID'].isin(subrivers_list)]
     selected_rivers.to_file(river_output_shp)
 
 
-
+subrivers_dommel_eindhoven = [10,9,8,50,7]
+subrivers_dommel_gestel = [52]
 subrivers_maas_roermond = [10, 37, 6]
 subrivers_maas_venlo = [7, 28, 27, 34]
 subrivers_maas_cuijk = [64, 9, 18]
@@ -119,9 +124,16 @@ subrivers_harinx = [1, 6, 4, 11, 12, 2]
 subrivers_nijmegen = [12,13,23]
 subrivers_zaltbommel = [14]
 
-river = 'input/river/maas/maas.shp'
-river_maastricht = 'input/river/maas/maastricht/maastricht.shp'
+river = 'dommel'
+city = 'eindhoven'
+# city = 'gestel'
+main_river = f'input/river/{river}/{river}.shp'
+river_folder = f'input/river/{river}/{city}'
+os.makedirs(river_folder, exist_ok=True)
+river_file = f'input/river/{river}/{city}/{city}.shp'
+# select_subrivers(main_river, subrivers_dommel_gestel, river_file)
 # select_subrivers(river, subrivers_maas_maastricht, river_maastricht)
+
 # AHN DATA RETRIEVAL----------------------------------------------------------------------------------------------------
 
 def load_json(json_path):
@@ -199,10 +211,13 @@ json_path_dsm = 'input/AHN/kaartbladindex_AHN_DSM.json'
 json_path_dtm = 'input/AHN/kaartbladindex_AHN_DTM.json'
 
 # Change these paths to correct river and destination folder
-main_rivers = ['ijssel', 'waal']
-cities = [['deventer'], ['nijmegen','zaltbommel']]
+# main_rivers = ['ijssel', 'waal']
+# cities = [['deventer'], ['nijmegen','zaltbommel']]
 
-
+file = f'input/river/{river}/{city}/{city}.shp'
+dtm_folder = f"input/AHN/{river}/{city}/DTM"
+os.makedirs(dtm_folder, exist_ok=True)
+download_AHN_tiles(json_path_dtm, file, dtm_folder)
 
 lonely_rivers = ['BovenMark', 'Harinxmakanaal', 'lek', 'vliet', 'Winschoterdiep']
 lonelier_rivers = ['RijnSchieKanaal', 'Schie', ]
@@ -228,15 +243,33 @@ def ahn_data(cities, main_river):
         download_AHN_tiles(json_path_dtm, river , destination_folder_dtm)
 
 # ahn_data(cities, main_river)
-for idx, main_river in enumerate(main_rivers):
-    ahn_data(cities[idx], main_river)
-
-ahn_for_loneliness(lonelier_rivers)
+# for idx, main_river in enumerate(main_rivers):
+#     ahn_data(cities[idx], main_river)
+#
+# ahn_for_loneliness(lonelier_rivers)
 
 # 3DBAG-----------------------------------------------------------------------------------------------------------------
-def fetch_3DBAG_tiles(fgb_path, buffer, river_gdf, output_folder, target_crs='EPSG:28992'):
+def fetch_3DBAG_tiles(fgb_path, buffer, river, output_folder, target_crs='EPSG:28992'):
+    """
+    Todo: if filepath for tile exists, then dont redownload
+    Args:
+        fgb_path:
+        buffer:
+        river:
+        output_folder:
+        target_crs:
+
+    Returns:
+
+    """
+    river_gdf = gpd.read_file(river)
     river_geometry = river_gdf.geometry.unary_union
     buffered_area = river_geometry.buffer(buffer)
+
+    # points_union = river_gdf.geometry.unary_union
+    # buffered_area = points_union.buffer(buffer)
+    # print(f"buffered area {buffered_area}")
+
 
     # Get the bounding box for the buffered area
     minx, miny, maxx, maxy = buffered_area.bounds
@@ -245,8 +278,8 @@ def fetch_3DBAG_tiles(fgb_path, buffer, river_gdf, output_folder, target_crs='EP
     # Load the tile index from the .fgb file
     with fiona.open(fgb_path) as src:
         tile_index = gpd.GeoDataFrame.from_features(src)
-    # print("Column names in the GeoDataFrame:", tile_index.columns.tolist())
-    # print(tile_index.head())
+    print("Column names in the GeoDataFrame:", tile_index.columns.tolist())
+    print(tile_index.head())
     # # Display the summary of the GeoDataFrame
     # tile_index.info()
 
@@ -431,12 +464,47 @@ def combine_geotiles(input_folder, output_file):
 
 # buffer and path
 buffer = 101  # Area around river so that there is some extra space for sure taken into account
-tile_index_path = 'thesis_output/needed_files/tile_index.fgb' #fgb file from 3DBAG with dimensions of tiles
+tile_index_path = 'input/3DBAG/tile_index.fgb' #fgb file from 3DBAG with dimensions of tiles
+main_rivers_segments = [ 'ijssel/', '', 'waal/', '']
+segments_subrivers = [['deventer'], ['lek'], ['nijmegen', 'zaltbommel'], ['Winschoterdiep']]
+segs = [[['_0_99', '_100_199', '_200_299', '_300_399', '_400_499', '_500_599', '_600_642']],[['_0_99', '_100_199', '_200_299', '_300_394']], [['_0_99', '_100_199', '_200_299', '_300_399', '_400_456'],['_0_99', '_100_178']], [['_0_99', '_100_199', '_200_299', '_300_348']] ]
 
-# Change these paths to correct river and destination folder
-tiles_folder = 'input/3DBAG/maas/tiles' #output folder for my retrieved tiles
-gdf_river = gpd.read_file('input/river/maas/maas.shp') #shapefile of my river in NL
-output_file = 'input/3DBAG/maas/combined_tiles/combined.gpkg' #File to write all tiles combined to
+main_rivers = ['maas/', '', '',  '', '', '']
+their_cities = [['cuijk', 'roermond', 'venlo','maastricht'],  ['BovenMark'], ['Harinxmakanaal'], ['RijnSchieKanaal'], ['schie'], ['vliet']]
+
+# for idx, rv in enumerate(main_rivers):
+#     for city in their_cities[idx]:
+#         gdf_river = f"input/river/{rv}{city}/{city}.shp"
+#
+#         tiles_folder = f'input/3DBAG/{rv}{city}/tiles'  # output folder for my retrieved tiles
+#         os.makedirs(tiles_folder, exist_ok=True)
+#         output_dir = f'input/3DBAG/{rv}{city}/{city}/combined_tiles'
+#         os.makedirs(output_dir, exist_ok=True)
+#         output_file = f'input/3DBAG/{rv}{city}/{city}/combined_tiles/combined.gpkg'
+#
+#         fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
+#         combine_geotiles(tiles_folder, output_file)
+
+# for idx, rv in enumerate(main_rivers_segments):
+#     for idy, city in enumerate(segments_subrivers[idx]):
+#         for seg in segs[idx][idy]:
+#             print(f"we work on {city} and segment {seg}")
+#             # Change these paths to correct river and destination folder
+#             tiles_folder = f'input/3DBAG/{rv}{city}/{city}{seg}/tiles' #output folder for my retrieved tiles
+#             os.makedirs(tiles_folder, exist_ok=True)
+#             parts = seg.rsplit('_', 1)  # Split from the right, splitting only once
+#             prefix, number = parts[0], parts[1]
+#             new_number = int(number) + 1
+#             new_seg = f"{prefix}_{new_number}"
+#             # gdf_river = gpd.read_file('input/river/maas/maas.shp') #shapefile of my river in NL
+#             gdf_river = f"output/visibility/segments/{rv}{city}/rivers/{city}_segment{new_seg}.shp"
+#             # gdf_river_pts = f'output/cross_sections/{rv}{city}/final/points{seg}'
+#             output_dir = f'input/3DBAG/{rv}{city}/{city}{seg}/combined_tiles' #File to write all tiles combined to
+#             os.makedirs(output_dir, exist_ok=True)
+#             output_file = f'input/3DBAG/{rv}{city}/{city}{seg}/combined_tiles/combined.gpkg' #File to write all tiles combined to
+#
+#             fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
+#             combine_geotiles(tiles_folder, output_file)
 
 # EXECUTE SCRIPT TO GET ALL TILES
 # fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
@@ -451,7 +519,7 @@ def download_bgt_data(river, shapefile_path, output_dir, buffer_distance=100):
         buffered_union = buffered_gdf.unary_union
         wkt_polygon = buffered_union.wkt
 
-        # API configuration
+        # API
         api_url = "https://api.pdok.nl/lv/bgt/download/v1_0"
         api_url_p = urlparse(api_url)
         base_url = f"{api_url_p.scheme}://{api_url_p.netloc}"
@@ -462,18 +530,19 @@ def download_bgt_data(river, shapefile_path, output_dir, buffer_distance=100):
             "Accept": "application/json"
         }
 
-        # Feature types from your original function
+
         featuretypes = [
             "bak", "begroeidterreindeel", "bord", "buurt", "functioneelgebied",
             "gebouwinstallatie", "installatie", "kast", "kunstwerkdeel", "mast",
             "onbegroeidterreindeel", "ondersteunendwaterdeel", "ondersteunendwegdeel",
             "ongeclassificeerdobject", "openbareruimte", "openbareruimtelabel",
             "overbruggingsdeel", "overigbouwwerk", "overigescheiding", "paal",
-            "pand", "plaatsbepalingspunt", "put", "scheiding", "sensor", "spoor",
+            "pand", "put", "scheiding", "sensor", "spoor",
             "stadsdeel", "straatmeubilair", "tunneldeel", "vegetatieobject",
             "waterdeel", "waterinrichtingselement", "waterschap", "wegdeel",
             "weginrichtingselement", "wijk"
         ]
+        # remove "plaatsbepalingspunt"
 
         # Prepare request data - using 'gmllight' format
         data = {
