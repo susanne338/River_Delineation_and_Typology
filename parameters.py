@@ -1,86 +1,18 @@
 """
-Computers parameter table
---> creates points at cross-section and initializes shapefile with all points. Each point has a cross-section id
---> add elevation values to the points in the shapefile
---> add landuse values
---> add visibility values
+Adds elev_dsm, imperviousness, landuse, visibility, and flood to points shapefile
 """
-
-import geopandas as gpd
-from shapely.geometry import Point, box
-import numpy as np
-import pandas as pd
 import os
+import fiona
+import pyproj
+import rasterio
+import pandas as pd
+from rasterio.transform import rowcol
 from tqdm import tqdm
 from rasterio.windows import from_bounds
-import rasterio
-from rasterio.enums import Resampling
-from rasterio.warp import calculate_default_transform, reproject
-import matplotlib.pyplot as plt
-from shapely import wkt
-import fiona
-
-# CROSS-SECTION POINTS AND ELEVATION------------------------------------------------------------------------------------
-def create_cross_section_points(cross_sections_shapefile, n_points, output_shapefile):
-    """
-    Creates points along cross-sections and calculates horizontal distances.
-
-    Parameters:
-    cross_sections_shapefile: Path to shapefile containing cross-section lines
-    n_points: Number of points to create along each cross-section
-    output_shapefile: Path where the resulting points shapefile will be saved
-
-    Returns:
-    GeoDataFrame containing points with horizontal distances
-    """
-    # Read cross-sections from shapefile
-    cross_sections = gpd.read_file(cross_sections_shapefile)
-    print(f"Loaded {len(cross_sections)} cross-sections from {cross_sections_shapefile}")
-
-    all_points = []
-
-    for ind, row in cross_sections.iterrows():
-        print('Processing cross-section', ind)
-
-        # Extract start and end coordinates from the LineString geometry
-        start_coords = list(row.geometry.coords)[0]
-        end_coords = list(row.geometry.coords)[1]
-
-        # Create points along the cross-section
-        lon = [start_coords[0]]
-        lat = [start_coords[1]]
-
-        for i in np.arange(1, n_points + 1):
-            x_dist = end_coords[0] - start_coords[0]
-            y_dist = end_coords[1] - start_coords[1]
-            point = [(start_coords[0] + (x_dist / (n_points + 1)) * i),
-                     (start_coords[1] + (y_dist / (n_points + 1)) * i)]
-            lon.append(point[0])
-            lat.append(point[1])
-
-        lon.append(end_coords[0])
-        lat.append(end_coords[1])
-
-        # Create Point objects and calculate distances
-        for i, (x, y) in enumerate(zip(lon, lat)):
-            point_geom = Point(x, y)
-            h_distance = Point(start_coords).distance(point_geom)
-            all_points.append({
-                'geometry': point_geom,
-                'id': ind,
-                'h_distance': h_distance
-            })
-
-    # Create GeoDataFrame
-    gdf = gpd.GeoDataFrame(all_points)
-    gdf.set_crs(epsg=28992, inplace=True)
-
-    # Save to shapefile
-    gdf.to_file(output_shapefile, driver='ESRI Shapefile')
-    print(f"Base cross-section points saved to: {output_shapefile}")
-
-    return gdf
-
+import geopandas as gpd
+import numpy as np
+from data_retrieval import run_data_retrieval
+from visibility import combine_viewsheds
 
 def add_elevation_from_tiles(shapefile_path, tiles_folder, elevation_column_name):
     """
@@ -95,9 +27,6 @@ def add_elevation_from_tiles(shapefile_path, tiles_folder, elevation_column_name
     GeoDataFrame with added elevation column and count of missing points
     """
     # Read existing shapefile
-    missing_points = 0
-    nodata_points = 0
-    outside_coverage = 0
     points_gdf = gpd.read_file(shapefile_path)
     print(f"Loaded {len(points_gdf)} points from {shapefile_path}")
 
@@ -106,73 +35,46 @@ def add_elevation_from_tiles(shapefile_path, tiles_folder, elevation_column_name
 
     # Get list of tif files
     tif_files = [f for f in os.listdir(tiles_folder) if f.endswith(".tif")]
+    print(f"List of tif file {tif_files}")
+    missing_points = 0
+    nodata_points = 0
 
-    # Process each cross-section separately
-    cross_sections = points_gdf.groupby('id')
+    for idy, tif_file in tqdm(enumerate(tif_files), total=len(tif_files), desc="Processing points"):
+        print(f"name of tif file {tif_file}")
+        tif_path = os.path.join(tiles_folder, tif_file)
+        elevation_found = False
+        with rasterio.open(tif_path) as src:
+            tif_bounds = src.bounds
+            minx, miny, maxx, maxy = tif_bounds
+            for idx, row in points_gdf.iterrows():
+                if row.geometry is not None:
+                    point = row.geometry
 
-    # Loop through each cross-section group
-    for cross_section_id, section_gdf in tqdm(cross_sections, desc="Processing cross sections"):
-        # Create bounding box for the cross-section
-        bounds = section_gdf.total_bounds
-        section_bbox = box(*bounds)
-
-        # Find relevant TIF files that intersect with this cross-section
-        relevant_tifs = []
-        for tif_file in tif_files:
-            tif_path = os.path.join(tiles_folder, tif_file)
-            with rasterio.open(tif_path) as src:
-                tile_bbox = box(*src.bounds)
-                if section_bbox.intersects(tile_bbox):
-                    relevant_tifs.append(tif_file)
-
-
-        if not relevant_tifs:
-            print(f"Warning: No TIF files found covering cross section {cross_section_id}")
-            outside_coverage += len(section_gdf)
-            continue
-
-        # Process each point in the cross-section
-        for idx, point in section_gdf.iterrows():
-            point_x, point_y = point.geometry.x, point.geometry.y
-            elevation_found = False
-            is_nodata = False
-
-            # Try each relevant TIF file until we find an elevation
-            for tif_file in relevant_tifs:
-                tif_path = os.path.join(tiles_folder, tif_file)
-                with rasterio.open(tif_path) as src:
-                    # Check if point is within this tile's bounds
-                    if (src.bounds.left <= point_x <= src.bounds.right and
-                            src.bounds.bottom <= point_y <= src.bounds.top):
-
+                    if minx <= point.x <= maxx and miny <= point.y <= maxy:
                         try:
-                            # Convert point coordinates to pixel coordinates
-                            py, px = src.index(point_x, point_y)
-
-                            # Read the elevation value
-                            window = rasterio.windows.Window(px - 1, py - 1, 3, 3)
+                            py, px = src.index(point.x, point.y)
+                            window = rasterio.windows.Window(px - 1, py - 1, 2, 2)
                             data = src.read(1, window=window)
-
-                            # Check center pixel
                             center_value = data[1, 1]
                             if center_value == src.nodata:
                                 is_nodata = True
                             elif data.size > 0:
                                 points_gdf.at[idx, elevation_column_name] = float(center_value)
                                 elevation_found = True
-                                break
+                                continue
 
                         except (IndexError, ValueError):
+                            print(f"there was an error processing this point in the tile")
                             continue
 
-            if not elevation_found:
-                missing_points += 1
-                if is_nodata:
-                    nodata_points += 1
-                    print(f"NoData value found for point {idx} at ({point_x}, {point_y})")
-                else:
-                    print(
-                        f"No elevation data found for point {idx} at ({point_x}, {point_y}) - point may be between tiles")
+                        if not elevation_found:
+                            missing_points += 1
+                            if is_nodata:
+                                nodata_points += 1
+                                print(f"NoData value found for point {idx} at ({point.x}, {point.y})")
+                            else:
+                                print(
+                                    f"No elevation data found for point {idx} at ({point.x}, {point.y}) - point may be between tiles")
 
     # Save the updated GeoDataFrame
     points_gdf.to_file(shapefile_path, driver='ESRI Shapefile')
@@ -181,31 +83,7 @@ def add_elevation_from_tiles(shapefile_path, tiles_folder, elevation_column_name
 
     return points_gdf
 
-# RUN SCRIPTS
-# create the cross-section points and initialize the shapefile
-# create_cross_section_points(
-#     cross_sections_shapefile='thesis_output/cross_sections/cross_sections_longest.shp',
-#     n_points=100,
-#     output_shapefile='output/parameters/parameters_longest.shp'
-# )
-
-# Add DTM elevation to the shapefile
-# add_elevation_from_tiles(
-#     shapefile_path='output/parameters/parameters_longest.shp',
-#     tiles_folder='thesis_output/AHN_tiles_DTM',
-#     elevation_column_name='elev_dtm'
-# )
-
-# Add DSM elevation to the same shapefile
-# add_elevation_from_tiles(
-#     shapefile_path='output/parameters/parameters_longest.shp',
-#     tiles_folder='thesis_output/AHN_tiles_DSM',
-#     elevation_column_name='elev_dsm'
-# )
-
-# LANDUSE---------------------------------------------------------------------------------------------------------------
-
-def process_landuse(points_gdf, gpkg_folder):
+def process_landuse(points_gdf, gml_folder):
     """
     Add landuse information to points GeoDataFrame from gpkg files from BGT data.
 
@@ -226,15 +104,15 @@ def process_landuse(points_gdf, gpkg_folder):
     points_with_landuse = set()
 
     bbox = points_gdf.total_bounds
-    print('I have found the bbox of points: ', bbox)
-    print('total number of points: ', len(points_gdf))
+    # print('I have found the bbox of points: ', bbox)
+    # print('total number of points: ', len(points_gdf))
 
     # Loop through gmlfiles
-    for i, gml_file in enumerate(os.listdir(gpkg_folder)):
+    for i, gml_file in enumerate(os.listdir(gml_folder)):
         if not gml_file.endswith('.gml'):
             continue
 
-        gml_path = os.path.join(gpkg_folder, gml_file)
+        gml_path = os.path.join(gml_folder, gml_file)
         print(f'\nProcessing file: {gml_file}')
         original_crs = 'epsg:28992'
         # with fiona.open(gml_path) as src:
@@ -259,7 +137,7 @@ def process_landuse(points_gdf, gpkg_folder):
                     landuse_filtered.set_crs(original_crs, inplace=True)
 
                 if len(landuse_filtered) == 0:
-                    print(f'No features in bbox for layer {layer_name}')
+                    # print(f'No features in bbox for layer {layer_name}')
                     continue
 
                 # Ensure CRS matches
@@ -315,20 +193,20 @@ def process_landuse(points_gdf, gpkg_folder):
     return points_gdf
 
 
-def add_landuse_to_shapefile(shapefile_path, gpkg_folder):
+def add_landuse_to_shapefile(shapefile_path, gml_folder):
     """
     Reads a shapefile, adds landuse information from gpkg files, and saves the updated shapefile.
 
     Parameters:
         shapefile_path: Path to the shapefile containing all cross-section points
-        gpkg_folder: Folder containing landuse .gpkg files
+        gml_folder:
     """
     # Read the shapefile
     gdf = gpd.read_file(shapefile_path)
     print('The shapefile has been read! its columns are: ', gdf.columns)
 
     # Add landuse information
-    gdf = process_landuse(gdf, gpkg_folder)
+    gdf = process_landuse(gdf, gml_folder)
     print("landuse is added to the geodataframe!")
 
     # Save updated shapefile
@@ -338,335 +216,215 @@ def add_landuse_to_shapefile(shapefile_path, gpkg_folder):
 
 def extract_unique_landuses(shapefile_path, output_file):
     """
-    Extract unique landuse values from a shapefile.
-
-    Args:
-        shapefile_path: Path to the shapefile containing landuse information
-        output_file: Path to save the unique landuses CSV
+    Extract unique landuse types from a shapefile, properly splitting combined values
+    and assigning unique indices to individual landuse types.
     """
-    # Read the shapefile as a GeoDataFrame
+    # Read the shapefile
     points_gdf = gpd.read_file(shapefile_path)
 
-    # Extract unique landuse values
-    unique_landuses = points_gdf['landuse'].dropna().unique()
+    # Create a list to store all individual landuse types
+    individual_landuses = []
 
-    # Convert to DataFrame and save to CSV
-    landuses_df = pd.DataFrame(unique_landuses, columns=['landuse'])
+    # Process each landuse entry
+    for landuse in points_gdf['landuse'].dropna():
+        # Split by semicolon and strip whitespace
+        parts = [part.strip() for part in str(landuse).split(';')]
+        # Add each individual part to our list
+        individual_landuses.extend(parts)
+
+    # Get unique values and sort them
+    unique_landuses = sorted(list(set(individual_landuses)))
+
+    # Create DataFrame with index
+    landuses_df = pd.DataFrame({
+        'landuse': unique_landuses,
+        'index': range(len(unique_landuses))
+    })
+
+    # Print some debug info
+    print("\nFinal DataFrame:")
+    print(landuses_df)
+    print(f"\nTotal unique landuse types: {len(landuses_df)}")
+
+    # Save to CSV
     landuses_df.to_csv(output_file, index=False)
-
     print(f"Unique landuses saved to: {output_file}")
 
-
-# RUN
-# I work with bgt_area now. I do not convert the file anymoer because the conversion gives me errors.
-# I loop over all .gml files. Results in missing values sometimes.
-# add_landuse_to_shapefile('output/parameters/parameters_longest.shp', 'input/BGT/bgt_area')
-# extract_unique_landuses('output/parameters/parameters_longest.shp', 'output/parameters/unique_landuses.csv')
-
-# check missing values, check shapefile-------------------------------------------
-# shapefile_path = 'output/parameters/parameters_longest.shp'
-# gdf = gpd.read_file(shapefile_path)
-# # Check for missing values
-# print("Columns in the shapefile:", gdf.columns.tolist())
-# # ['id', 'h_distance', 'elev_dtm', 'elev_dsm', 'landuse', 'geometry']
-# missing_landuse_count = gdf['landuse'].isna().sum()
-# missing_dtm_count = gdf['elev_dtm'].isna().sum()
-# missing_dsm_count = gdf['elev_dsm'].isna().sum()
-# print(f"Number of missing values in 'landuse, dtm and dsm': {missing_landuse_count} , {missing_dtm_count}, {missing_dsm_count}")
-
-# Number of missing values is 371, 5239, 4111
+    return landuses_df
 
 
-# IMPERVIOUSNESS
-def check_imperviousness(location, imperviousness_raster):
-    with rasterio.open(imperviousness_raster) as src:
-        # read band 1 (number between 1-100)
-        imperviousness_data = src.read(1)
-
-        # Extract coordinates from the Point object
-        x, y = location.x, location.y
-
-        # Get the row, col index of the pixel corresponding to the point
-        row, col = src.index(x, y)
-
-        # Read the pixel value at the point's location
-        pixel_value = imperviousness_data[row, col]
-        print(f"The pixel value at ({x}, {y}) is: {pixel_value}")
-        return pixel_value
-
-def compute_imperviousness(row, imperviousness_raster):
-    location = row['geometry']
-    return check_imperviousness(location, imperviousness_raster)
-
-def add_imperviousness_column(shapefile, imperviousness_raster):
-    gdf = gpd.read_file(shapefile)
-    tqdm.pandas(desc="Computing impreviousness for each point")
-    gdf['imperv'] = gdf.progress_apply(compute_imperviousness, axis=1, imperviousness_raster=imperviousness_raster)
-    gdf.to_file(shapefile)
-    print(f"Updated shapefile saved to: {shapefile}")
-    return
-
-
-
-# imperviouness_data = 'input/imperviousness/imperv_reproj_28992.tif'
-# shapefile_path = 'output/parameters/parameters_longest.shp'
-# add_imperviousness_column(shapefile_path, imperviouness_data)
-
-# shapefile_path = 'output/parameters/parameters_longest.shp'
-# gdf = gpd.read_file(shapefile_path)
-# print("Columns in the shapefile:", gdf.columns.tolist())
-# missing_imperv_count = gdf['imperv'].isna().sum()
-# print(f"Missing imperviousness is {missing_imperv_count} ")
-# gdf.to_csv("only_to_check.csv", index=False)
-
-# VISIBILITY------------------------------------------------------------------------------------------------------------
-# Before running visibility, it needs to run the viewshed function first, which implies running the metric function first
-def check_visibility(location, viewshed_file):
+# IMPERVIOUSNESS AND VISIBILITY
+def normalize_crs(crs):
     """
-    Checks the visibility of a point based on the viewshed raster.
-
-    Parameters:
-        location (Point): The geometry (Shapely Point object) representing the point's location.
-        viewshed_file (str): The file path to the viewshed raster.
-
-    Returns:
-        int: Pixel value at the point's location (1 for visible, 0 for not visible, other for different values).
+    Normalize CRS to EPSG:28992 if it's any variant of Amersfoort RD New
     """
-    with rasterio.open(viewshed_file) as src:
-        # Read the viewshed data from the first band
-        viewshed_data = src.read(1)
+    if crs:
+        # Check for various forms of Amersfoort RD New
+        if any(marker in str(crs).upper() for marker in ['AMERSFOORT', 'RD NEW', '28992']):
+            return pyproj.CRS.from_epsg(28992)
+    return crs
 
-        # Extract coordinates from the Point object
-        x, y = location.x, location.y
 
-        # Get the row, col index of the pixel corresponding to the point
-        row, col = src.index(x, y)
+def load_raster_data(raster_path):
+    """
+    Load raster data and return necessary components for processing.
+    """
+    with rasterio.open(raster_path) as src:
+        data = src.read(1)  # Read the first band
+        transform = src.transform
+        bounds = src.bounds
+        crs = normalize_crs(src.crs)
+        print(f"Raster transform: {transform}")
+        print(f"Raster shape: {data.shape}")
+    return data, transform, bounds, crs
 
-        # Read the pixel value at the point's location
-        pixel_value = viewshed_data[row, col]
 
-        # Check the visibility based on the pixel value
-        if pixel_value == 1:
-            print(f"The point at ({x}, {y}) is visible.")
-        elif pixel_value == 0:
-            print(f"The point at ({x}, {y}) is not visible.")
+def check_raster_value(location, raster_data, transform, bounds):
+    """
+    Check raster value at a given point location.
+    """
+    if location is None or location.is_empty or location.geom_type != 'Point':
+        print(f"Invalid location: {location}")
+        return np.nan
+
+    x, y = location.x, location.y
+
+    # Check if point is within raster bounds with a small buffer
+    buffer = 1.0  # 1 meter buffer
+    if not (bounds.left - buffer <= x <= bounds.right + buffer and
+            bounds.bottom - buffer <= y <= bounds.top + buffer):
+        print(f"Point ({x}, {y}) is outside raster bounds: {bounds}")
+        return np.nan
+
+    try:
+        # Convert coordinates to pixel indices using rasterio's rowcol function
+        row, col = rowcol(transform, x, y)
+
+        # Convert to integers
+        row, col = int(row), int(col)
+
+        # Debug information
+        # print(f"Point coordinates: ({x}, {y})")
+        # print(f"Pixel coordinates: (row={row}, col={col})")
+        # print(f"Raster shape: {raster_data.shape}")
+
+        # Ensure indices are within array bounds
+        if 0 <= row < raster_data.shape[0] and 0 <= col < raster_data.shape[1]:
+            value = raster_data[row, col]
+            # print(f"Sampled value: {value}")
+            return value
         else:
-            print(f"The pixel value at ({x}, {y}) is: {pixel_value}")
+            print(f"Computed pixel coordinates ({row}, {col}) are outside raster dimensions {raster_data.shape}")
+            return np.nan
 
-    return pixel_value
+    except Exception as e:
+        print(f"Error processing point ({x}, {y}): {str(e)}")
+        return np.nan
 
 
-# Function to apply visibility check for each row in the GeoDataFrame
-def compute_visibility(row, viewshed_file):
+def compute_raster_value(row, raster_data, transform, bounds):
     """
-    Compute visibility for a given row in the GeoDataFrame using the viewshed raster.
-
-    Parameters:
-        row: A row of the GeoDataFrame.
-        viewshed_file (str): The file path to the viewshed raster.
-
-    Returns:
-        int: The visibility value (pixel value from the viewshed raster).
+    Compute raster value for a GeoDataFrame row.
     """
-    location = row['geometry']  # The Point object (geometry)
-
-    # Call the visibility function using the location and the viewshed file
-    return check_visibility(location, viewshed_file)
+    location = row['geometry']
+    return check_raster_value(location, raster_data, transform, bounds)
 
 
-# Apply the compute_visibility function to each row in the GeoDataFrame
-def add_visibility_column(shapefile, viewshed_file):
+def add_raster_column(shapefile_path, raster_path, column_name, overwrite=True):
     """
-    Adds a 'visibility' column to the GeoDataFrame by checking the visibility of each point.
-
-    Parameters:
-        gdf (GeoDataFrame): The GeoDataFrame containing point geometries.
-        viewshed_file (str): The file path to the viewshed raster.
-
-    Returns:
-        GeoDataFrame: The updated GeoDataFrame with a new 'visibility' column.
+    Add raster values as a new column to a shapefile.
     """
-    gdf = gpd.read_file(shapefile)
-    # I replace the following line to add a tqdm progress tracker
-    # gdf['visibility'] = gdf.apply(compute_visibility, axis=1, viewshed_file=viewshed_file)
+    # Load raster data
+    raster_data, transform, bounds, raster_crs = load_raster_data(raster_path)
 
-    # Initialize tqdm to add progress bar support for the apply function
-    tqdm.pandas(desc="Computing visibility for each point")
-    gdf['visibility'] = gdf.progress_apply(compute_visibility, axis=1, viewshed_file=viewshed_file)
-
-    gdf.to_file(shapefile)
-    print(f"Updated shapefile saved to: {shapefile}")
-    return
-
-
-def load_csv_to_geodataframe(csv_file):
-    """
-    Loads a CSV file into a GeoDataFrame, converting coordinate columns into Point geometries.
-
-    Parameters:
-        csv_file (str): Path to the CSV file.
-
-    Returns:
-        GeoDataFrame: A GeoDataFrame with Point geometries.
-    """
-    # Load the CSV into a DataFrame
-    df = pd.read_csv(csv_file)
-    # geometry is a string but needs to be POINT objects
-    df['geometry'] = df['geometry'].apply(wkt.loads)
-
-    # Convert the DataFrame into a GeoDataFrame, specifying that the 'geometry' column contains Point geometries
-    gdf = gpd.GeoDataFrame(df, geometry='geometry')
-
-    return gdf
-
-# RUN VISIBILITY
-# I would say this took like an hour or so
-# parameters = 'output/parameters/parameters_longest.shp'
-# viewshed_file = 'thesis_output/visibility/combined_viewshed.tif'
-# gdf_with_vis = add_visibility_column(parameters, viewshed_file)
-# gdf = gpd.read_file('output/parameters/parameters_longest.shp')
-# print("Columns in the shapefile:", gdf.columns.tolist())
-# gdf = gpd.read_file('output/cross_sections/cross_sections_midpoints.shp')
-# print('columns ', gdf.columns.tolist())
-# missing_visible_count = gdf['visibility'].isna().sum()
-# print(f"Number of missing values in 'visbility': {missing_visible_count}")
-
-
-# CHECK DATA IN PARAMETER TABLE----------------------------------------------------------------------------------------
-def export_cross_sections_to_csv(shapefile_path, output_folder):
-    """
-    Reads a shapefile containing all cross-section points and exports separate CSV files
-    for each cross-section.
-
-    Parameters:
-    shapefile_path: Path to the shapefile containing all cross-section points
-    output_folder: Folder where individual CSV files will be saved
-    """
-    # Create output folder if it doesn't exist
-    os.makedirs(output_folder, exist_ok=True)
-
-    # Read the shapefile
+    # Load shapefile data
     gdf = gpd.read_file(shapefile_path)
 
-    # Convert geometry to x,y coordinates
-    gdf['x'] = gdf.geometry.x
-    gdf['y'] = gdf.geometry.y
+    # Normalize the shapefile CRS
+    gdf.crs = normalize_crs(gdf.crs)
 
-    # Group by cross_section_id and save separate files
-    for cross_section_id, group in gdf.groupby('id'):
-        # Select relevant columns and convert to DataFrame
-        csv_df = pd.DataFrame({
-            'x': group.x,
-            'y': group.y,
-            'h_distance': group.h_distance,
-            'elev_dtm': group.elev_dtm if 'elev_dtm' in group.columns else None,
-            'elev_dsm': group.elev_dsm if 'elev_dsm' in group.columns else None,
-            'landuse' : group.landuse
-        })
+    # Print CRS information
+    # print(f"Normalized Shapefile CRS: {gdf.crs}")
+    # print(f"Normalized Raster CRS: {raster_crs}")
 
-        # Save to CSV
-        output_path = os.path.join(output_folder, f'cross_section_{cross_section_id}.csv')
-        csv_df.to_csv(output_path, index=False)
-        print(f"Saved cross-section {cross_section_id} to {output_path}")
+    # Print bounds information
+    # print(f"\nRaster bounds: {bounds}")
+    # print(f"Points extent: {gdf.total_bounds}")
 
+    # Verify points overlap with raster
+    points_bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
+    if not (bounds.left <= points_bounds[2] and points_bounds[0] <= bounds.right and
+            bounds.bottom <= points_bounds[3] and points_bounds[1] <= bounds.top):
+        print("WARNING: Points extent does not overlap with raster extent!")
 
-def analyze_cross_section_data(shapefile_path):
-    """
-    Provides a summary of the data in the cross-sections shapefile.
+    # Check if column exists
+    if column_name in gdf.columns and not overwrite:
+        raise ValueError(f"Column {column_name} already exists and overwrite=False")
 
-    Parameters:
-    shapefile_path: Path to the shapefile containing all cross-section points
-    """
-    gdf = gpd.read_file(shapefile_path)
+    # Process points in smaller chunks to avoid memory issues
+    chunk_size = 1000
+    num_chunks = len(gdf) // chunk_size + (1 if len(gdf) % chunk_size else 0)
 
-    print("\nCross-sections summary:")
-    print(f"columns: ", gdf.columns)
-    print(f"Total number of cross-sections: {len(gdf.id.unique())}")
-    print(f"Total number of points: {len(gdf)}")
-    print("\nAvailable columns:", list(gdf.columns))
+    results = []
+    for i in tqdm(range(num_chunks), desc=f"Processing chunks"):
+        start_idx = i * chunk_size
+        end_idx = min((i + 1) * chunk_size, len(gdf))
+        chunk = gdf.iloc[start_idx:end_idx]
 
-    # Group by cross-section and show points per cross-section
-    points_per_cs = gdf.groupby('id').size()
-    print("\nPoints per cross-section:")
-    print(points_per_cs)
+        chunk_results = chunk.apply(
+            compute_raster_value,
+            axis=1,
+            raster_data=raster_data,
+            transform=transform,
+            bounds=bounds
+        )
+        results.extend(chunk_results)
 
-    # Show a sample of the data
-    print("\nSample of the data (first 5 points):")
-    sample_df = gdf.copy()
-    sample_df['x'] = sample_df.geometry.x
-    sample_df['y'] = sample_df.geometry.y
-    print(sample_df.drop('geometry', axis=1).head())
+    # Add results to the GeoDataFrame
+    gdf[column_name] = results
 
+    # Save updated shapefile
+    gdf.to_file(shapefile_path)
+    print(f"\nUpdated shapefile saved to: {shapefile_path}")
 
-def read_single_cross_section(shapefile_path, cross_section_id):
-    """
-    Extracts data for a single cross-section from the shapefile.
-
-    Parameters:
-    shapefile_path: Path to the shapefile containing all cross-section points
-    cross_section_id: ID of the cross-section to extract
-
-    Returns:
-    DataFrame containing the cross-section data
-    """
-    gdf = gpd.read_file(shapefile_path)
-
-    # Filter for specific cross-section
-    cs_data = gdf[gdf.id == cross_section_id].copy()
-
-    # Add x,y coordinates as columns
-    cs_data['x'] = cs_data.geometry.x
-    cs_data['y'] = cs_data.geometry.y
-
-    return cs_data.drop('geometry', axis=1)
-
-# Look at parameter shapefile
-# analyze_cross_section_data('output/parameters/parameters_longest.shp')
+    # Print summary statistics
+    valid_values = gdf[column_name].dropna()
+    print("\nSummary statistics for sampled values:")
+    print(f"Total points: {len(gdf)}")
+    print(f"Valid values: {len(valid_values)}")
+    print(f"Invalid/out of bounds: {len(gdf) - len(valid_values)}")
+    if len(valid_values) > 0:
+        print(f"Min value: {valid_values.min()}")
+        print(f"Max value: {valid_values.max()}")
+        print(f"Mean value: {valid_values.mean():.2f}")
 
 
+def run_parameters(river, city):
+    # run_data_retrieval(river, city)
+
+    points_shp = f"output/cross_sections/{river}/{city}/final/points.shp"
+    viewshed_file = f'output/visibility/{river}/{city}/combined_viewshed.tif'
+    tiles_folder_dsm = f"input/AHN/{river}/{city}/DSM"
+    bgt_folder = f"input/BGT/{river}/{city}"
+    unique_landuses_output = f"output/unique_landuses/{city}.csv"
+    os.makedirs('output/unique_landuses', exist_ok=True)
+    flood_folder = "input/flood/middelgrote_kans"
+    imperv_raster = f"input/imperviousness/MERGED_reproj_28992.tif"
+
+    add_landuse_to_shapefile(points_shp, bgt_folder)
+    extract_unique_landuses(points_shp, unique_landuses_output)
+
+    add_elevation_from_tiles(points_shp,flood_folder , 'flood_dept')
+    add_elevation_from_tiles(points_shp, tiles_folder_dsm, 'elev_dsm')
+
+    add_raster_column(shapefile_path=points_shp, raster_path=imperv_raster, column_name='imperv')
+
+    viewshed_dir= f'output/visibility/{river}/{city}/viewsheds'
+    visibility_dir = f'output/visibility/{river}/{city}'
+    output_file = os.path.join(visibility_dir, 'combined_viewshed.tif')
+    combine_viewsheds(viewshed_dir, output_file)
+    add_raster_column(shapefile_path=points_shp, raster_path=viewshed_file, column_name='visible')
 
 
-# Export all cross-sections to individual CSV files--------------------------------------------------------------------
-# export_cross_sections_to_csv('output/parameters/parameters_longest.shp', 'output/parameters/csv')
-
-
-
-
-# gdf = gpd.read_file('output/parameters/parameters_longest.shp')
-# missing_dsm = gdf['elev_dsm'].isnull().sum()
-# print(f"Number of missing values in 'elev_dsm': {missing_dsm}")
-
-# Check for missing values in the 'elev_dtm' column
-# missing_dtm = gdf['elev_dtm'].isnull().sum()
-# print(f"Number of missing values in 'elev_dtm': {missing_dtm}")
-
-# PLOT ELEVATIONS
-def plot_csv_parameters(csv_path):
-    # Load the CSV file
-    df = pd.read_csv(csv_path)  # Replace 'your_file.csv' with your actual file path
-
-    # Create the plot
-    plt.figure(figsize=(10, 6))
-
-    # Scatter plot for elev_dtm
-    plt.scatter(df['h_distance'], df['elev_dtm'], color='blue', label='elev_dtm', alpha=0.6)
-
-    # Scatter plot for elev_dsm
-    plt.scatter(df['h_distance'], df['elev_dsm'], color='red', label='elev_dsm', alpha=0.6)
-
-    # Add vertical lines for each elev_dsm point
-    for index, row in df.iterrows():
-        plt.axvline(x=row['h_distance'], color='red', linestyle='-', alpha=0.1)
-
-    # Adding labels and title
-    plt.xlabel('Horizontal Distance (h_distance)')
-    plt.ylabel('Elevation')
-    plt.title('Elevation Comparison')
-    plt.legend()
-
-    # Show the plot
-    plt.grid()
-    plt.tight_layout()
-    plt.show()
-
-# plot_csv_parameters('output/parameters/csv/cross_section_0.csv')
+if __name__ == "__main__":
+    run_parameters('dommel', 'gestel')
