@@ -26,6 +26,7 @@ import os
 from urllib.parse import urlparse
 import zipfile
 
+# todo: filterering of bgt data is incorrect. Reduce feauterure types for bgt?
 
 # AHN DATA RETRIEVAL----------------------------------------------------------------------------------------------------
 """
@@ -404,12 +405,13 @@ def delete_bgt_temporal(folder_path):
                     # Filter rows where 'objectEindTijd' is NaN or None
                     df_filtered = df[df['objectEindTijd'].isna()]
                     print(f"length of filtered df is {len(df_filtered)}")
-                    df_filtered.to_file(file_path, driver="GML")
+                    df_filtered.to_file(file_path, driver="GML") #Do i have to add layer name?
                     print(f"Processed {filename}, saved filtered data to {filename}")
                 else:
                     print(f"Column 'objectEindTijd' not found in {filename}")
             except Exception as e:
                 print(f"Error processing {filename}: {e}")
+                # Usually when this happens, I also can't seem to open the file in QGIS
                 print('Maybe the file is corrupt')
 
 
