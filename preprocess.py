@@ -19,7 +19,6 @@ midpoint file
 embankment file
 cross-section segments
 points of each segment
-
 """
 import math
 import os
@@ -31,7 +30,7 @@ from rasterio.windows import from_bounds
 import geopandas as gpd
 from shapely.geometry import LineString, Point
 import numpy as np
-from data_retrieval import load_json, download_AHN_tile, download_AHN_tiles
+
 
 # Get cross_sections intersecting with river---------------------------------------------------------------------------
 def cross_section_extraction(river_file, interval, width, output_file_cs, output_river_mid):
@@ -267,7 +266,6 @@ def extract_max_elevation_values(points, midpoints_file,
         embankments_shp: path to file to write embankment points to
 
     Returns: saves values left, right (embankment), max, and (viewpoint) height to midpoints_file
-    TODO: now when the river extend my buffer, no boundary point gets added. Fix to edge of buffer, or last point
     """
     points = gpd.read_file(points)
     midpoints = gpd.read_file(midpoints_file)
@@ -396,30 +394,51 @@ def cut_segment(embankments_shp, points_shp, pts_outputfile, cs_outputfile, segm
 
     filtered_cs = []
     filtered_pts = []
+    filtered_embankments = []
 
     # grouped_pts = points.groupby('id')
     # for idx, segment in enumerate(grouped_pts):
     for id, segment in points.groupby('id'):
         # id = segment.iloc[0]['id']
         print(f'id is {id}')
-        left_embankment_hdist = embankment.loc[(embankment['id'] == id) & (embankment['side'] == 0), 'h_dist'].iloc[0]
-        right_embankment_hdist = embankment.loc[(embankment['id'] == id) & (embankment['side'] == 1), 'h_dist'].iloc[0]
+        # left_embankment_hdist = embankment.loc[(embankment['id'] == id) & (embankment['side'] == 0), 'h_dist'].iloc[0]
+        # right_embankment_hdist = embankment.loc[(embankment['id'] == id) & (embankment['side'] == 1), 'h_dist'].iloc[0]
+        left_embankment = embankment.loc[(embankment['id'] == id) & (embankment['side'] == 0)]
+        right_embankment = embankment.loc[(embankment['id'] == id) & (embankment['side'] == 1)]
 
         # if left_embankment_hdist is None:
         #     #invalid segment, skip
         #     print(f"left embankment distance value is {left_embankment_hdist}, thus bridge?")
         #     continue
-        if math.isnan(left_embankment_hdist):
+        if math.isnan(left_embankment['h_dist'].iloc[0]):
             #invalid segment, skip
             print(f"left embankment is math.nan")
             continue
+
+        left_embankment_hdist = left_embankment['h_dist'].iloc[0]
+        right_embankment_hdist = right_embankment['h_dist'].iloc[0]
+
         min_distance = left_embankment_hdist - segment_width
         max_distance = right_embankment_hdist + segment_width
         print(f"min and max distances: {min_distance}, {max_distance}")
 
         points_filtered = segment[(segment['h_distance'] < max_distance) & (segment['h_distance'] > min_distance)]
-        filtered_pts.append(points_filtered)
 
+        #re-start h_diatnce at 0 by subtracting min value
+        min_h_distance = points_filtered['h_distance'].min()
+        points_filtered['h_distance'] = points_filtered['h_distance'] - min_h_distance
+        filtered_pts.append(points_filtered)
+        # also for embankment
+        left_embankment_filtered = left_embankment.copy()
+        right_embankment_filtered = right_embankment.copy()
+
+        left_embankment_filtered['h_dist'] = left_embankment_filtered['h_dist'] - min_h_distance
+        right_embankment_filtered['h_dist'] = right_embankment_filtered['h_dist'] - min_h_distance
+
+        filtered_embankments.append(left_embankment_filtered)
+        filtered_embankments.append(right_embankment_filtered)
+
+        # Cross-sections
         max_id, min_id = points_filtered['h_distance'].idxmax(), points_filtered['h_distance'].idxmin()
         geometry_max, geometry_min = points_filtered.loc[max_id, 'geometry'], points_filtered.loc[min_id, 'geometry']
         cs = LineString([geometry_min, geometry_max])
@@ -429,6 +448,11 @@ def cut_segment(embankments_shp, points_shp, pts_outputfile, cs_outputfile, segm
     all_filtered_pts = pd.concat(filtered_pts)
     gdf_filtered_pts = gpd.GeoDataFrame(all_filtered_pts, geometry='geometry')
     gdf_filtered_pts.to_file(pts_outputfile, driver= 'ESRI Shapefile')
+
+
+    all_filtered_embankments = pd.concat(filtered_embankments)
+    gdf_filtered_embankments = gpd.GeoDataFrame(all_filtered_embankments, geometry='geometry')
+    gdf_filtered_embankments.to_file(embankments_shp, driver='ESRI Shapefile')
 
     df_cs = pd.DataFrame(filtered_cs, columns=['id', 'geometry'])
     gdf_cs = gpd.GeoDataFrame(df_cs, geometry='geometry')
@@ -471,7 +495,10 @@ def run_preprocess(river, city):
     json_path_dtm = 'input/AHN/kaartbladindex_AHN_DTM.json'
 
     # RUN
-    download_AHN_tiles(json_path_dtm, river_file, tiles_folder_dtm) # for some reason it still prints from here
+    # Get data
+    from data_retrieval import run_data_retrieval
+    run_data_retrieval(river, city)
+
     cross_section_extraction(river_file, interval, width_preprocess, cs_preprocess, river_midpoints)
     create_cross_section_points(cs_preprocess, width_preprocess, pts_preprocess)
     add_elevation_from_tiles(pts_preprocess, tiles_folder_dtm, 'elev_dtm')
@@ -479,10 +506,8 @@ def run_preprocess(river, city):
     cut_segment(embankments_file, pts_preprocess, pts_final, cs_final, width_segment)
 
 
-"""
-Run the preprocess-----------------------------------------------------------------------------------------------------
-"""
 
-river = 'dommel'
-city = 'eindhoven'
-run_preprocess(river, city)
+if __name__ == "__main__":
+    river = 'dommel'
+    city = 'eindhoven'
+    run_preprocess(river, city)
