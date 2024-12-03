@@ -27,114 +27,11 @@ from urllib.parse import urlparse
 import zipfile
 
 
-
-# OSM RIVER-------------------------------------------------------------------------------------------------------------
-# to fetch, change tags in function
-def fetch_river_overpass(river_name ,type, output_file):
-    """
-    :param river_name:
-    :param output_file:
-    :return: geodataframe of river eihter as geometry=lines or geometry = polygons AND saves as shapefile
-    """
-    api = overpy.Overpass()
-    # These are all possibilities but I would get multiple rivers if I didn't specify that it was a canal. I need to alter the function so that I can specify more? or even just take some id instead of river name
-    # Overpass query
-    # query = f"""
-    # [out:json];
-    # (
-    #   way["waterway"="river"]["name"="{river_name}"];
-    #   way["waterway"="canal"]["name"="{river_name}"];
-    #   relation["waterway"="river"]["name"="{river_name}"];
-    #   way["water"="river"]["name"="{river_name}"];
-    #   relation["water"="river"]["name"="{river_name}"];
-    #   way["natural"="water"]["name"="{river_name}"];
-    #   relation["natural"="water"]["name"="{river_name}"];
-    # );
-    # out body;
-    # """
-    query = f"""
-        [out:json];
-        (
-          way["waterway"={type}]["name"="{river_name}"];
-        );
-        out body;
-        """
-
-
-    result = api.query(query)
-
-    lines = []
-    polygons = []
-
-    for way in result.ways:
-        # Resolve missing nodes (fetch missing node data if needed)
-        way.get_nodes(resolve_missing=True)
-        coords = [(float(node.lon), float(node.lat)) for node in way.nodes]
-        lines.append(LineString(coords))
-
-    for rel in result.relations:
-        for member in rel.members:
-            if member.geometry:
-                coords = [(float(geom.lon), float(geom.lat)) for geom in member.geometry]
-                polygons.append(Polygon(coords))
-
-    # Save to shapefile
-    if lines:
-        gdf = gpd.GeoDataFrame(geometry=lines,  crs="EPSG:4326")
-        gdf = gdf.to_crs("EPSG:28992")
-        gdf.to_file(output_file, driver='ESRI Shapefile')
-        print(f"Shapefile saved with line geometries: {output_file}")
-        return gdf
-    elif polygons:
-        gdf = gpd.GeoDataFrame(geometry=polygons,  crs="EPSG:4326")
-        gdf = gdf.to_crs("EPSG:28992")
-        gdf.to_file(output_file, driver='ESRI Shapefile')
-        print(f"Shapefile saved with polygon geometries: {output_file}")
-        return gdf
-    else:
-        print(f"No data found for {river_name}")
-
-
-# execute
-# river = 'dommel'
-# os.makedirs(f"input/river/{river}", exist_ok=True)
-# river_shp = f"input/river/{river}/{river}.shp"
-# fetch_river_overpass('Dommel', 'river', river_shp)
-
-def select_subrivers(river_shp, subrivers_list, river_output_shp):
-    river = gpd.read_file(river_shp)
-    selected_rivers = river[river['FID'].isin(subrivers_list)]
-    selected_rivers.to_file(river_output_shp)
-
-
-subrivers_dommel_eindhoven = [10,9,8,50,7]
-subrivers_dommel_gestel = [52]
-subrivers_maas_roermond = [10, 37, 6]
-subrivers_maas_venlo = [7, 28, 27, 34]
-subrivers_maas_cuijk = [64, 9, 18]
-subrivers_maas_maastricht = [2, 5]
-subrivers_ar_amsterdam = [0]
-subrivers_ar_utrecht = [27, 25]
-subrivers_ijssel_zwolle_deventer = [0]
-subrivers_lek = [2]
-subrivers_vliet = [0, 5, 4, 11, 10, 6, 3]
-subrivers_schie = [0]
-subrivers_winschoterdiep = [0, 1, 2]
-subrivers_harinx = [1, 6, 4, 11, 12, 2]
-subrivers_nijmegen = [12,13,23]
-subrivers_zaltbommel = [14]
-
-river = 'dommel'
-city = 'eindhoven'
-# city = 'gestel'
-main_river = f'input/river/{river}/{river}.shp'
-river_folder = f'input/river/{river}/{city}'
-os.makedirs(river_folder, exist_ok=True)
-river_file = f'input/river/{river}/{city}/{city}.shp'
-# select_subrivers(main_river, subrivers_dommel_gestel, river_file)
-# select_subrivers(river, subrivers_maas_maastricht, river_maastricht)
-
 # AHN DATA RETRIEVAL----------------------------------------------------------------------------------------------------
+"""
+download_ahn_tiles fetches the tiles that intersect with the buffered river using the tile indices
+and the url in the JSON files that need to be downloaded beforehand. 
+"""
 
 def load_json(json_path):
     with open(json_path, 'r') as file:
@@ -200,53 +97,6 @@ def download_AHN_tiles(json_path, river_file, destination_folder):
         #         print(f"Tile {tile_name} intersects with the buffer, keeping it.")
 
 
-"""
-download_ahn_tiles fetches the tiles that intersect with the buffered river using the tile indices
-and the url in the JSON files that need to be downloaded beforehand. 
-"""
-
-
-# JSON paths
-json_path_dsm = 'input/AHN/kaartbladindex_AHN_DSM.json'
-json_path_dtm = 'input/AHN/kaartbladindex_AHN_DTM.json'
-
-# Change these paths to correct river and destination folder
-# main_rivers = ['ijssel', 'waal']
-# cities = [['deventer'], ['nijmegen','zaltbommel']]
-
-file = f'input/river/{river}/{city}/{city}.shp'
-dtm_folder = f"input/AHN/{river}/{city}/DTM"
-os.makedirs(dtm_folder, exist_ok=True)
-download_AHN_tiles(json_path_dtm, file, dtm_folder)
-
-lonely_rivers = ['BovenMark', 'Harinxmakanaal', 'lek', 'vliet', 'Winschoterdiep']
-lonelier_rivers = ['RijnSchieKanaal', 'Schie', ]
-def ahn_for_loneliness(rivers):
-    for river in rivers:
-        print(river)
-        file = f'input/river/{river}/{river}.shp'
-        dsm_folder = f"input/AHN/{river}/DSM"
-        os.makedirs(dsm_folder, exist_ok=True)
-        dtm_folder = f"input/AHN/{river}/DTM"
-        os.makedirs(dtm_folder, exist_ok=True)
-        download_AHN_tiles(json_path_dsm, file, dsm_folder)
-        download_AHN_tiles(json_path_dtm, file, dtm_folder)
-def ahn_data(cities, main_river):
-    for city in cities:
-        river=f'input/river/{main_river}/{city}/{city}.shp'
-        destination_folder_dsm= f'input/AHN/{main_river}/{city}/DSM'
-        os.makedirs(destination_folder_dsm, exist_ok=True)
-        destination_folder_dtm = f'input/AHN/{main_river}/{city}/DTM'
-        os.makedirs(destination_folder_dtm, exist_ok=True)
-
-        download_AHN_tiles(json_path_dsm,river, destination_folder_dsm)
-        download_AHN_tiles(json_path_dtm, river , destination_folder_dtm)
-
-# ahn_data(cities, main_river)
-# for idx, main_river in enumerate(main_rivers):
-#     ahn_data(cities[idx], main_river)
-#
-# ahn_for_loneliness(lonelier_rivers)
 
 # 3DBAG-----------------------------------------------------------------------------------------------------------------
 def fetch_3DBAG_tiles(fgb_path, buffer, river, output_folder, target_crs='EPSG:28992'):
@@ -265,10 +115,6 @@ def fetch_3DBAG_tiles(fgb_path, buffer, river, output_folder, target_crs='EPSG:2
     river_gdf = gpd.read_file(river)
     river_geometry = river_gdf.geometry.unary_union
     buffered_area = river_geometry.buffer(buffer)
-
-    # points_union = river_gdf.geometry.unary_union
-    # buffered_area = points_union.buffer(buffer)
-    # print(f"buffered area {buffered_area}")
 
 
     # Get the bounding box for the buffered area
@@ -295,11 +141,7 @@ def fetch_3DBAG_tiles(fgb_path, buffer, river, output_folder, target_crs='EPSG:2
         tile_id = row['tile_id']
         gpkg_download = row['gpkg_download']  # this is the download link
         tile_id = tile_id.replace('/', '-')
-        # print("tile id ", tile_id)
-        # print("gpkg download ", gpkg_download)
         download_url = gpkg_download
-        # download_url = f"https://3dbag.nl/en/download?tid={tile_id}"
-        # download_url = f"https://data.3dbag.nl/v20240420/tiles/9/284/556/{tile_id}.gpkg"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
@@ -307,12 +149,17 @@ def fetch_3DBAG_tiles(fgb_path, buffer, river, output_folder, target_crs='EPSG:2
         response = requests.get(download_url, headers=headers)
         # response = requests.get(download_url)
 
+        gz_tile_filename = os.path.join(output_folder, f"{tile_id}.gpkg.gz")
+        if os.path.exists(gz_tile_filename):
+            print(f"Already downloaded tile {gz_tile_filename}")
+            continue
+
         if response.status_code == 200:
             # the tile is in compressed gz format
-            gz_tile_filename = os.path.join(output_folder, f"{tile_id}.gpkg.gz")
             with open(gz_tile_filename, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
+
             print(f"Downloaded tile: {tile_id} and iteration {iteration}")
 
             # I use iterations so it doesnt mmediatly download 4000 tiles here becuase i did something wrong before
@@ -356,42 +203,6 @@ def fetch_3DBAG_tiles(fgb_path, buffer, river, output_folder, target_crs='EPSG:2
 
             except Exception as e:
                 print(f"Failed to process GeoPackage: {e}")
-
-            #     gdf = gpd.read_file(gpkg_filename)
-            #     print(f"Successfully opened GeoPackage with GeoPandas: {gpkg_filename}")
-            #     print(f"Original CRS: {gdf.crs}")
-            #     # print(gdf.head())
-            #     if gdf.crs != target_crs:
-            #         gdf = gdf.to_crs(target_crs)
-            #         print(f"Transformed CRS to: {gdf.crs}")
-            #
-            #     transformed_gpkg = os.path.join(output_folder, f"{tile_id}_transformed.gpkg")
-            #     gdf.to_file(transformed_gpkg, driver="GPKG")
-            #     print(f"Saved transformed GeoPackage: {transformed_gpkg}")
-            #
-            #     # Optionally, remove the original untransformed file
-            #     os.remove(gpkg_filename)
-            #     print(f"Removed original untransformed file: {gpkg_filename}")
-            #
-            #
-            #
-            # except Exception as e:
-            #     print(f"Failed to open GeoPackage with GeoPandas: {e}")
-
-            # buildings = gpd.read_file(f"{output_folder}/{tile_id}.gpkg", layer='lod12_2d')
-            # print(buildings.head())
-
-            # try:
-            #     with fiona.open(tile_filename) as src:
-            #         print(f"Successfully opened GeoPackage: {tile_filename}")
-            #         print(f"Number of layers: {len(src)}")
-            #         for layer in src:
-            #             print(layer)
-            # except Exception as e:
-            #     print(f"Failed to open GeoPackage: {e}")
-
-            # if iteration > 5:
-            #     return
 
         else:
             print(f"Failed to download tile: {tile_id}, Status code: {response.status_code}")
@@ -457,61 +268,8 @@ def combine_geotiles(input_folder, output_file):
     print(f"All layers combined and saved to {output_file}")
 
 
-"""
-3DBAG data retrieval is done via the .fgb file specifying the tile indices and url
-"""
-
-
-# buffer and path
-buffer = 101  # Area around river so that there is some extra space for sure taken into account
-tile_index_path = 'input/3DBAG/tile_index.fgb' #fgb file from 3DBAG with dimensions of tiles
-main_rivers_segments = [ 'ijssel/', '', 'waal/', '']
-segments_subrivers = [['deventer'], ['lek'], ['nijmegen', 'zaltbommel'], ['Winschoterdiep']]
-segs = [[['_0_99', '_100_199', '_200_299', '_300_399', '_400_499', '_500_599', '_600_642']],[['_0_99', '_100_199', '_200_299', '_300_394']], [['_0_99', '_100_199', '_200_299', '_300_399', '_400_456'],['_0_99', '_100_178']], [['_0_99', '_100_199', '_200_299', '_300_348']] ]
-
-main_rivers = ['maas/', '', '',  '', '', '']
-their_cities = [['cuijk', 'roermond', 'venlo','maastricht'],  ['BovenMark'], ['Harinxmakanaal'], ['RijnSchieKanaal'], ['schie'], ['vliet']]
-
-# for idx, rv in enumerate(main_rivers):
-#     for city in their_cities[idx]:
-#         gdf_river = f"input/river/{rv}{city}/{city}.shp"
-#
-#         tiles_folder = f'input/3DBAG/{rv}{city}/tiles'  # output folder for my retrieved tiles
-#         os.makedirs(tiles_folder, exist_ok=True)
-#         output_dir = f'input/3DBAG/{rv}{city}/{city}/combined_tiles'
-#         os.makedirs(output_dir, exist_ok=True)
-#         output_file = f'input/3DBAG/{rv}{city}/{city}/combined_tiles/combined.gpkg'
-#
-#         fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
-#         combine_geotiles(tiles_folder, output_file)
-
-# for idx, rv in enumerate(main_rivers_segments):
-#     for idy, city in enumerate(segments_subrivers[idx]):
-#         for seg in segs[idx][idy]:
-#             print(f"we work on {city} and segment {seg}")
-#             # Change these paths to correct river and destination folder
-#             tiles_folder = f'input/3DBAG/{rv}{city}/{city}{seg}/tiles' #output folder for my retrieved tiles
-#             os.makedirs(tiles_folder, exist_ok=True)
-#             parts = seg.rsplit('_', 1)  # Split from the right, splitting only once
-#             prefix, number = parts[0], parts[1]
-#             new_number = int(number) + 1
-#             new_seg = f"{prefix}_{new_number}"
-#             # gdf_river = gpd.read_file('input/river/maas/maas.shp') #shapefile of my river in NL
-#             gdf_river = f"output/visibility/segments/{rv}{city}/rivers/{city}_segment{new_seg}.shp"
-#             # gdf_river_pts = f'output/cross_sections/{rv}{city}/final/points{seg}'
-#             output_dir = f'input/3DBAG/{rv}{city}/{city}{seg}/combined_tiles' #File to write all tiles combined to
-#             os.makedirs(output_dir, exist_ok=True)
-#             output_file = f'input/3DBAG/{rv}{city}/{city}{seg}/combined_tiles/combined.gpkg' #File to write all tiles combined to
-#
-#             fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
-#             combine_geotiles(tiles_folder, output_file)
-
-# EXECUTE SCRIPT TO GET ALL TILES
-# fetch_3DBAG_tiles(tile_index_path, buffer, gdf_river, tiles_folder)
-# combine_geotiles(tiles_folder, output_file)
-
-# BGT--------------------------------------------------------------------------------------------------
-def download_bgt_data(river, shapefile_path, output_dir, buffer_distance=100):
+# BGT-------------------------------------------------------------------------------------------------------------------
+def download_bgt_data(city_name, shapefile_path, output_dir, buffer_distance=100):
     try:
         # Read and buffer the shapefile
         gdf = gpd.read_file(shapefile_path)
@@ -595,8 +353,8 @@ def download_bgt_data(river, shapefile_path, output_dir, buffer_distance=100):
             # Create output directory
             # output_dir = os.path.dirname(output_bgt)
             # os.mkdir(output_bgt, exist_ok=True)
-            zip_path = os.path.join(output_dir, f"{river}.zip")
-            extract_dir = os.path.join(output_dir, f"{river}")
+            zip_path = os.path.join(output_dir, f"{city_name}.zip")
+            # extract_dir = os.path.join(output_dir, f"{city_name}")
 
             # Download zip file
             print(f"Downloading file to {zip_path}")
@@ -605,15 +363,15 @@ def download_bgt_data(river, shapefile_path, output_dir, buffer_distance=100):
                 f.write(response.content)
 
             # Extract zip file
-            print(f"Extracting files to {extract_dir}")
+            print(f"Extracting files to {output_dir}")
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
+                zip_ref.extractall(output_dir)
 
             # Remove zip file after extraction
             os.remove(zip_path)
 
             print("Download and extraction completed successfully")
-            return extract_dir
+            return output_dir
 
         return None
 
@@ -621,25 +379,66 @@ def download_bgt_data(river, shapefile_path, output_dir, buffer_distance=100):
         print(f"An error occurred: {e}")
         return None
 
-# Run by looping over all rivers
-lonely_rivers = ['lek', 'RijnSchieKanaal', 'schie', 'vliet']
-main_rivers = ['waal', 'ar']
-their_cities = [['nijmegen'], ['amsterdam']]
-# for idx, main in enumerate(main_rivers):
-#     for city in their_cities[idx]:
-#         river_shp = f"input/river/{main}/{city}/{city}.shp"
-#         output_bgt = f"input/BGT"
 
-# for river in lonely_rivers:
-#     river_shp = f"input/river/{river}/{river}.shp"
-#     output_bgt = f"input/BGT"
-    # os.mkdir(output_bgt, exist_ok=True)
-    #     result = download_bgt_data(city, river_shp, output_bgt)
-    #     if result:
-    #         print(f"Data extracted to: {result}")
-    #         # Print list of downloaded files
-    #         for file in os.listdir(result):
-    #             if file.endswith('.gml'):
-    #                 print(f"- {file}")
-    #     else:
-    #         print("Download failed")
+def delete_bgt_temporal(folder_path):
+    """
+    Delete the objects that have ended
+    Args:
+        folder_path: folder path to BGT folder containing the .gml files
+
+    Returns:
+
+    """
+    for filename in os.listdir(folder_path):
+        if filename.endswith(".gml"):  # Process only GML files
+            file_path = os.path.join(folder_path, filename)
+
+            # Read the GML file into a DataFrame
+            try:
+                # Assuming GML files are structured as tabular data that pandas can read
+                df = gpd.read_file(file_path)
+
+                # Check if the 'objectEindTijd' column exists
+                if 'objectEindTijd' in df.columns:
+                    print(f"length of df is {len(df)}")
+                    # Filter rows where 'objectEindTijd' is NaN or None
+                    df_filtered = df[df['objectEindTijd'].isna()]
+                    print(f"length of filtered df is {len(df_filtered)}")
+                    df_filtered.to_file(file_path, driver="GML")
+                    print(f"Processed {filename}, saved filtered data to {filename}")
+                else:
+                    print(f"Column 'objectEindTijd' not found in {filename}")
+            except Exception as e:
+                print(f"Error processing {filename}: {e}")
+                print('Maybe the file is corrupt')
+
+
+def run_data_retrieval(river, city):
+
+    json_path_dsm = 'input/AHN/kaartbladindex_AHN_DSM.json'
+    json_path_dtm = 'input/AHN/kaartbladindex_AHN_DTM.json'
+
+    river_file = f'input/river/{river}/{city}/{city}.shp'
+    dsm_folder = f"input/AHN/{river}/{city}/DSM"
+    dtm_folder= f'input/AHN/{river}/{city}/DTM'
+
+    # buffer and path
+    # buffer = 101  # Area around river so that there is some extra space for sure taken into account
+    # tile_index_path = 'input/3DBAG/tile_index.fgb' #fgb file from 3DBAG with dimensions of tiles
+    # tiles_folder = f'input/3DBAG/{river}/{city}/tiles'  # output folder for my retrieved tiles
+    # os.makedirs(tiles_folder, exist_ok=True)
+    # output_dir = f'input/3DBAG/{river}/{city}/{city}/combined_tiles'
+    # os.makedirs(output_dir, exist_ok=True)
+    # output_file = f'input/3DBAG/{river}/{city}/{city}/combined_tiles/combined.gpkg'
+    #
+    # download_AHN_tiles(json_path_dsm, river_file, dsm_folder)
+    # download_AHN_tiles(json_path_dtm, river_file, dtm_folder)
+    # fetch_3DBAG_tiles(tile_index_path, buffer, river_file, tiles_folder)
+    # combine_geotiles(tiles_folder, output_file)
+    #
+    bgt_folder = f"input/BGT/{river}/{city}"
+    # os.makedirs(bgt_folder, exist_ok=True)
+    # download_bgt_data(city, river_file, bgt_folder)
+    delete_bgt_temporal(bgt_folder)
+
+run_data_retrieval('dommel', 'eindhoven')
