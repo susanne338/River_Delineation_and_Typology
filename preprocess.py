@@ -1,16 +1,20 @@
 """
 Execute data_retrieval_river script before to get river input file
+This script gets all the cross-sections, retrieves the data, and adds all the parameters.
+
+execute visibility after
 
 INPUT:
 river and city names, river shapefile.
 
 
 This script performs preprocess:
-1. download dtm files
+1. download dtm,dsm,bgt,3dbag files
 2. Compute wide cross-sections and points
 3. Adds elevation to the dataframe elev_dtm
 4. Finds embankment points by selecting the first value elev_dtm that is not None from the midpoint. When midpoint has value, we assume its a bridge and segment is invalid
 5. Cut segment 100 meters from embankment points
+
 
 
 OUTPUT:
@@ -19,6 +23,7 @@ midpoint file
 embankment file
 cross-section segments
 points of each segment
+todo: add elevation now also takes the merged dsm, maybe I should put that in different folder. But thats why it takes a bit longer
 """
 import math
 import os
@@ -307,7 +312,6 @@ def extract_max_elevation_values(points, midpoints_file,
 
         # Find the closest point to this target midpoint
         midpoint_idx = (cross_section_points['h_distance'] - target_midpoint).abs().idxmin()
-        # todo: if midpoint has elevation value, then segment is invalid (bridge)
 
         # Initialize left and right values
         left_value = None
@@ -491,17 +495,19 @@ def run_preprocess(river, city):
     embankments_file = f"output/embankment/{river}/{city}/embankments.shp"
     tiles_folder_dtm = f'input/AHN/{river}/{city}/DTM'
     os.makedirs(tiles_folder_dtm, exist_ok=True)
+    tiles_folder_dsm = f"input/AHN/{river}/{city}/DSM"
+    os.makedirs(tiles_folder_dsm, exist_ok=True)
 
-    json_path_dtm = 'input/AHN/kaartbladindex_AHN_DTM.json'
 
     # RUN
     # Get data
-    from data_retrieval import run_data_retrieval
-    run_data_retrieval(river, city)
+    # from data_retrieval import run_data_retrieval
+    # run_data_retrieval(river, city)
 
     cross_section_extraction(river_file, interval, width_preprocess, cs_preprocess, river_midpoints)
     create_cross_section_points(cs_preprocess, width_preprocess, pts_preprocess)
     add_elevation_from_tiles(pts_preprocess, tiles_folder_dtm, 'elev_dtm')
+    add_elevation_from_tiles(pts_preprocess, tiles_folder_dsm, 'elev_dsm')
     extract_max_elevation_values(pts_preprocess, river_midpoints,user_defined_height, embankments_file)
     cut_segment(embankments_file, pts_preprocess, pts_final, cs_final, width_segment)
 
