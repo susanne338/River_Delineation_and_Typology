@@ -101,16 +101,19 @@ river = 'dommel'
 
 def select_subrivers(river_shp, subrivers_list, river_output_shp):
     river = gpd.read_file(river_shp)
-    selected_rivers = river[river['FID'].isin(subrivers_list)]
+    # selected_rivers = river[river['FID'].isin(subrivers_list)]
+    # selected_rivers.to_file(river_output_shp)
+    selected_rivers = river[river['FID'].isin(subrivers_list)].set_index('FID')
+    selected_rivers = selected_rivers.loc[subrivers_list]
+    selected_rivers = selected_rivers.reset_index()
     selected_rivers.to_file(river_output_shp)
 
 
 # city = 'eindhoven'
-city = 'gestel'
+city = 'eindhoven'
 
-# main_river = f'input/river/{river}/{river}.shp'
+main_river = f'input/river/{river}/{river}.shp'
 # river_folder = f'input/river/{river}/{city}'
 # os.makedirs(river_folder, exist_ok=True)
-# river_file = f'input/river/{river}/{city}/{city}.shp'
-# select_subrivers(main_river, subrivers_dommel_gestel, river_file)
-# select_subrivers(river, subrivers_maas_maastricht, river_maastricht)
+river_file = f'input/river/{river}/{city}/{city}.shp'
+select_subrivers(main_river, subrivers_dommel_eindhoven, river_file)
