@@ -103,15 +103,16 @@ def cross_section_extraction(river_file, interval, width, output_file_cs, output
     total_length = 0
 
     # starting_point = 0
+    i = 0
 
-    for index, row in projected_gdf.iterrows():
+    for index, row in tqdm(projected_gdf.iterrows(), total=projected_gdf.shape[0], desc="Processing each river"):
         riverline = row['geometry']
 
-        print("index, riverline length: ", index, riverline.length)
+        # print("index, riverline length: ", index, riverline.length)
         # distance = 0
         total_length += riverline.length
 
-        i = 0
+
         for distance_along_line in np.arange(0, riverline.length, interval):
             side_0, side_1, point_on_line = get_perpendicular_cross_section(riverline, distance_along_line, width)
 
@@ -129,7 +130,8 @@ def cross_section_extraction(river_file, interval, width, output_file_cs, output
             })
 
             river_points.append({'geometry': point_on_line,
-                                 'rv_id': index})
+                                 'rv_id': index,
+                                'cs_id': i})
             i += 1
             # distance = distance_along_line
 
@@ -141,10 +143,10 @@ def cross_section_extraction(river_file, interval, width, output_file_cs, output
     gdf.to_file(output_file_cs, driver='ESRI Shapefile')
 
     # Save river midpoints to shapefile (.shp)
-    river_points_gdf = gpd.GeoDataFrame(river_points)
-    river_points_gdf.set_crs(epsg=28992, inplace=True)
-    river_points_gdf.to_file(output_river_mid, driver='ESRI Shapefile')
-    print(f"total length river {total_length}")
+    # river_points_gdf = gpd.GeoDataFrame(river_points)
+    # river_points_gdf.set_crs(epsg=28992, inplace=True)
+    # river_points_gdf.to_file(output_river_mid, driver='ESRI Shapefile')
+    print(f"Total length river {total_length} and sections amount is {i}")
     return
 
 
@@ -183,9 +185,67 @@ def get_perpendicular_cross_section(line, distance_along_line, width):
     return side_1, side_2, point_on_line
 
 
+def clean_bridges(cs_clean_shp, cs_clean_nobridge_shp, mid_shp, overbruggingsdeel_shp, bridge_points_output_shp):
+    gdf_cs = gpd.read_file(cs_clean_shp)
+    gdf_mid = gpd.read_file(mid_shp)
+    gdf_bridges = gpd.read_file(overbruggingsdeel_shp)
+
+    # Ensure crs
+    gdf_cs = gdf_cs.to_crs(epsg=28992)
+    gdf_mid = gdf_mid.to_crs(epsg=28992)
+    gdf_bridges = gdf_bridges.to_crs(epsg=28992)
+
+    bridge_points = []
+    # initialize bridge column. 0 means no bridge, 1 means bridge
+    gdf_mid['bridge'] = 0
+
+    for index, row in tqdm(gdf_bridges.iterrows(), total=gdf_bridges.shape[0],
+                           desc="Processing each bridge"):
+        bridge_geom = row['geometry']
+        intersections = gdf_mid[gdf_mid.intersects(bridge_geom)]
+
+        if not intersections.empty:
+            # print(f"Intersection found! for bridge {index}")
+
+            for idx, point in intersections.iterrows():
+                pt_geom = point['geometry']
+                pt_id = point['cs_id']
+                # print(f"point geometry is {point['geometry']} and id of river is is {point['rv_id']}")
+                bridge_points.append({'geometry': pt_geom, 'cs_id': pt_id})
+
+                # Midpoint is marked as bridge
+                gdf_mid.loc[gdf_mid['cs_id']== pt_id, 'bridge'] = 1
+
+                # Remove sections
+                # rows_to_drop = gdf_cs[gdf_cs['cs_id'] == pt_id].index
+                # if not rows_to_drop.empty:
+                #     gdf_cs = gdf_cs.drop(rows_to_drop)
+                # gdf_cs.drop(gdf_cs[(gdf_cs['cs_id'] == pt_id)].index, inplace=True)
+
+    # bridge_midpoints = gpd.GeoDataFrame(bridge_points)
+    # bridge_midpoints.set_crs(epsg=28992, inplace=True)
+    # bridge_midpoints.to_file(bridge_points_output_shp, driver="ESRI Shapefile")
+
+    print("Start removing bridges from the cs shapefile...")
+    # Remove rows in gdf_cs where 'cs_id' matches
+    bridge_cs_ids = gdf_mid[gdf_mid['bridge'] == 1]['cs_id'].unique()
+    print(f"CS IDs to remove: {bridge_cs_ids}")
+
+
+    gdf_cs_cleaned = gdf_cs[~gdf_cs['cs_id'].isin(bridge_cs_ids)]
+
+    # Save the cleaned GeoDataFrame
+    gdf_cs_cleaned.to_file(cs_clean_nobridge_shp, driver="ESRI Shapefile")
+    print(f"Cleaned from bridges GeoDataFrame saved to {cs_clean_nobridge_shp}")
+
+    gdf_mid.to_file(mid_shp, driver= "ESRI Shapefile")
+    print(f"bridges amount of midpoints is {gdf_mid[gdf_mid['bridge'] == 1].shape[0]}")
+
+
 def clean_cross_sections(cs_shp, non_urban_area_shp, output_file):
     gdf_cs = gpd.read_file(cs_shp)
     gdf_non_urban_areas = gpd.read_file(non_urban_area_shp)
+
     for index, row in tqdm(gdf_cs.iterrows(), total=gdf_cs.shape[0],
                        desc="Processing each section, checking if it lays in a non-urban area"):
         line_geom = row['geometry']
@@ -193,29 +253,8 @@ def clean_cross_sections(cs_shp, non_urban_area_shp, output_file):
         if not intersections.empty:
             gdf_cs = gdf_cs.drop(index)
 
-    # for _, row in tqdm(gdf_non_urban_areas.iterrows(),
-    #                    total=gdf_non_urban_areas.shape[0],
-    #                    desc="Processing non-urban areas"):
-    #
-    #     polygon_geom = row['geometry']
-    #     intersections = gdf_cs[gdf_cs.intersects(polygon_geom)]
-    #
-    #     if not intersections.empty:
-    #         for index, line in intersections.iterrows():
-    #             gdf_cs = gdf_cs.drop(gdf_cs[(gdf_cs['rv_id'] == line['rv_id']) &
-    #                                  (gdf_cs['cs_id'] == line['cs_id']) &
-    #                                  (gdf_cs['side'] == line['side'])].index)
-
     gdf_cs.set_crs(epsg=28992, inplace=True)
     gdf_cs.to_file(output_file, driver= "ESRI Shapefile")
-
-
-def clean_bridges(cs_shp, mid_shp, overbruggingsdeel_shp):
-    gdf_cs = gpd.read_file(cs_shp)
-    gdf_mid = gpd.read_file(mid_shp)
-    gdf_bridges = gpd.read_file(cs_shp)
-
-
 
 
 def create_cross_section_points(cross_sections_shapefile, cs_width, output_shapefile):
@@ -279,27 +318,56 @@ def create_cross_section_points(cross_sections_shapefile, cs_width, output_shape
 
     return gdf
 
-#This is the shapefile containing the areas with a population density higher than 1000 in the Netherlands
-pop_dens_shp = "input/RIVERS/popdenshigehrthan1000raster.shp"
-gdf_popdens = gpd.read_file(pop_dens_shp)
-#Output file for rivers
+
+
+
+
+
+# Output file for rivers
 rivers_total_shp = "input/RIVERS/OSM_rivers.shp"
 # fetch_waterways_in_areas(gdf_popdens, rivers_total_shp)
+# --> Clip in QGIS
 
+# This file is all the rivers that fall into urban areas
 rivers_shp = "input/RIVERS/OSM_rivers_clipped.shp"
-river_gdf = gpd.read_file(rivers_shp)
+#This is the shapefile containing the areas with a population density higher than 1000 in the Netherlands
+# pop_dens_shp = "input/RIVERS/popdenshigehrthan1000raster.shp"
 
+#These are the files needed to create the cross sections
 cross_section_lines_directory = "output/CS/lines"
 os.makedirs(cross_section_lines_directory, exist_ok=True)
 cross_section_lines_shp = "output/CS/lines/cs_lines.shp"
 cross_sections_lines_cleaned_shp = "output/CS/lines/cs_lines_cleaned.shp"
+cross_sections_lines_cleaned_nobridge_shp = "output/CS/lines/cs_lines_nobridge_cleaned.shp"
+
 cross_section_mid_directory = "output/CS/mid"
 os.makedirs(cross_section_mid_directory, exist_ok=True)
 cross_section_mid_shp = "output/CS/mid/cs_mid.shp"
 
-points_shp = "output/PTS/pts_shp"
+# CLEANUP: remove bridges and remove non-urban areas
+# These are the bgt bridge ('overbruggingsdeel') polygons in the urban areas
+bridges_shp = "input/DATA/BGT/bgt_overbrugginsdeel_clipped.shp"
+bridges_midpoints_shp = "input/DATA/BGT/bridges_mid.shp"
+# This is the shapefile defining non-urban areas in the Netherlands (opposite of the urban areas file)
 non_urban_areas = "input/urban_areas/non_urban_areas.shp"
 
-# cross_section_extraction(rivers_shp, 50, 450, cross_section_lines_shp, cross_section_mid_shp )
-clean_cross_sections(cross_sections_lines_cleaned_shp, non_urban_areas, cross_sections_lines_cleaned_shp)
-# create_cross_section_points(cross_section_lines_shp, 600, points_shp)
+# Output file for the points
+points_shp = "output/PTS/pts_shp"
+
+# remove_bridge_rows(cross_section_mid_shp, cross_sections_lines_cleaned_shp, cross_sections_lines_cleaned_nobridge_shp)
+
+"""
+First create the initial cross-sections and midpoints of our segments.
+Then clean the sections by removing the ones that lay in non-urban areas.
+Clean by removing sections that are bridges.
+todo: I make a new file now for bridge points but i can better add it as a new column to midpoint as bridge: 0, 1
+"""
+cross_section_extraction(rivers_shp, 50, 450, cross_section_lines_shp, cross_section_mid_shp )
+# clean_cross_sections(cross_sections_lines_shp, non_urban_areas, cross_sections_lines_cleaned_shp)
+# clean_bridges(cross_sections_lines_cleaned_shp, cross_sections_lines_cleaned_nobridge_shp, cross_section_mid_shp, bridges_shp, bridges_midpoints_shp)
+
+
+
+# todo: find embankment, make new sections
+
+# create_cross_section_points(cross_section_lines_shp, 100, points_shp)
