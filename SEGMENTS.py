@@ -119,7 +119,6 @@ def cross_section_extraction(river_file, interval, width, output_file_cs, output
         # distance = 0
         total_length += riverline.length
 
-
         for distance_along_line in np.arange(0, riverline.length, interval):
             side_0, side_1, point_on_line = get_perpendicular_cross_section(riverline, distance_along_line, width)
 
@@ -248,31 +247,36 @@ def clean_bridges(cs_clean_shp, cs_clean_nobridge_shp, mid_shp, overbruggingsdee
     print(f"Amount of midpoints identified as bridges is {gdf_mid[gdf_mid['bridge'] == 1].shape[0]}")
 
 # Find embankment
-def add_grid_id_to_cs(cs_shp, grid_shp, cs_shp_added_gridvalue):
+def add_grid_id_to_cs_and_mid(cs_shp, grid_shp, mid_shp):
+    # make sure grid_shp is NOT the buffered grid
+    print("Reading files...")
     cs_gdf = gpd.read_file(cs_shp)
     grid_gdf = gpd.read_file(grid_shp)
+    mid_gdf = gpd.read_file(mid_shp)
+
     if cs_gdf.crs != grid_gdf.crs:
         grid_gdf = grid_gdf.to_crs(cs_gdf.crs)
-
-    joined_gdf = gpd.sjoin(cs_gdf, grid_gdf[['gid', 'geometry']], how='left', predicate='intersects')
+    print("Joining dataframes..")
+    joined_cs_gdf = gpd.sjoin(cs_gdf, grid_gdf[['gid', 'geometry']], how='left', predicate='intersects')
+    joined_mid_gdf = gpd.sjoin(mid_gdf, grid_gdf[['gid', 'geometry']], how='left', predicate='intersects')
     # print(joined_gdf[['gid']].head())
 
-    joined_gdf.to_file(cs_shp_added_gridvalue, driver="ESRI Shapefile")
+    print("Saving files...")
+    joined_cs_gdf.to_file(cs_shp, driver="ESRI Shapefile")
+    joined_mid_gdf.to_file(mid_shp, driver="ESRI Shapefile")
 
-def find_embankment(cs_shp, cs_shp_cleaned_embank, mid_shp, dissolved_waterdelen_shp, grid_shp,  embank_shp):
-    # todo: add in a check for if the intersection also lays on the original grid, then we do not want to add it as an embankment
+def find_embankment(cs_shp, cs_shp_cleaned_embank, mid_shp, dissolved_waterdelen_shp,  embank_shp):
     print("Reading files...")
     gdf_cs = gpd.read_file(cs_shp)
     gdf_mid = gpd.read_file(mid_shp)
-    gdf_water = gpd.read_file(dissolved_waterdelen_shp)
-    gdf_grid = gpd.read_file(grid_shp)
+    gdf_water = gpd.read_file(dissolved_waterdelen_shp) #these are seperated into buffered grid cells
 
     to_drop = set()
     embankment_results = {}  # Key: cs_id, Value: (intersection_point, distance, grid_id)
 
-    grouped_cs = gdf_cs.groupby('gid')
+    grouped_mid = gdf_mid.groupby('gid')
 
-    for gid, group_cs in tqdm(grouped_cs, desc="Processing grid cells"):
+    for gid, group_mid in tqdm(grouped_mid, desc="Processing grid cells"):
         # Get the water features for this grid cell
         grid_water = gdf_water[gdf_water['gid'] == gid]
 
@@ -280,70 +284,66 @@ def find_embankment(cs_shp, cs_shp_cleaned_embank, mid_shp, dissolved_waterdelen
             continue
 
         # Process each section in this grid
-        for index, section in group_cs.iterrows():
-            section_geom = section['geometry']
-            cs_id = section['cs_id']
-            rv_id = section['rv_id']
-            side = section['side']
-            # Create unique identifier tuple
-            unique_id = (cs_id, side)
+        for index, midpoint in group_mid.iterrows():
+            midpoint_geom = midpoint['geometry']
+            cs_id = midpoint['cs_id']
 
-            # Find intersections with water features boundaries in this grid
-            intersection_points = []
-            for _, water_feature in grid_water.iterrows():
-                try:
-                    # Get the boundary of the water polygon
-                    water_boundary = water_feature.geometry.boundary
+            sides = [0, 1]
+            for side in sides:
+                # Create unique identifier tuple
+                unique_id = (cs_id, side)
+                cs_row = gdf_cs[(gdf_cs['cs_id'] == cs_id) & (gdf_cs['side'] == side)]
+                if cs_row.empty:
+                    continue
 
-                    # Check intersection with boundary
-                    if section_geom.intersects(water_boundary):
-                        intersection = section_geom.intersection(water_boundary)
+                section_geom = cs_row['geometry'].iloc[0]
 
-                        # Convert intersection to point(s)
-                        if isinstance(intersection, LineString):
-                            intersection_point = Point(intersection.coords[0])
-                            intersection_points.append(intersection_point)
-                        elif isinstance(intersection, Point):
-                            intersection_points.append(intersection)
-                        elif isinstance(intersection, MultiPoint):
-                            # Add all points from multipoint
-                            intersection_points.extend([Point(p.coords[0]) for p in intersection.geoms])
-                        elif isinstance(intersection, MultiLineString):
-                            # Add first point of each linestring
-                            intersection_points.extend([Point(line.coords[0]) for line in intersection.geoms])
-                        elif isinstance(intersection, GeometryCollection):
-                            # Handle each geometry in the collection
-                            for geom in intersection.geoms:
-                                if isinstance(geom, Point):
-                                    intersection_points.append(geom)
-                                elif isinstance(geom, LineString):
-                                    intersection_points.append(Point(geom.coords[0]))
-                        else:
-                            print(f"Unexpected intersection type: {type(intersection)}")
-                            continue
+                # Find intersections with water features boundaries in this grid
+                intersection_points = []
+                for _, water_feature in grid_water.iterrows():
+                    try:
+                        # Get the boundary of the water polygon
+                        water_boundary = water_feature.geometry.boundary
 
-                except Exception as e:
-                    print(f"Error processing intersection for cs_id {cs_id}, side {side}: {e}")
+                        # Check intersection with boundary
+                        if section_geom.intersects(water_boundary):
+                            intersection = section_geom.intersection(water_boundary)
 
-            if not intersection_points:
-                # Only mark for dropping if we haven't found an intersection for this unique_id yet
-                if unique_id not in embankment_results:
-                    to_drop.add(index)
-                continue
+                            # Convert intersection to point(s)
+                            if isinstance(intersection, LineString):
+                                intersection_point = Point(intersection.coords[0])
+                                intersection_points.append(intersection_point)
+                            elif isinstance(intersection, Point):
+                                intersection_points.append(intersection)
+                            elif isinstance(intersection, MultiPoint):
+                                # Add all points from multipoint
+                                intersection_points.extend([Point(p.coords[0]) for p in intersection.geoms])
+                            elif isinstance(intersection, MultiLineString):
+                                # Add first point of each linestring
+                                intersection_points.extend([Point(line.coords[0]) for line in intersection.geoms])
+                            elif isinstance(intersection, GeometryCollection):
+                                # Handle each geometry in the collection
+                                for geom in intersection.geoms:
+                                    if isinstance(geom, Point):
+                                        intersection_points.append(geom)
+                                    elif isinstance(geom, LineString):
+                                        intersection_points.append(Point(geom.coords[0]))
+                            else:
+                                print(f"Unexpected intersection type: {type(intersection)}")
+                                continue
 
-            # Get midpoint for distance calculation
-            mid_row = gdf_mid[gdf_mid['cs_id'] == cs_id]
-            mid_geom = mid_row.geometry.iloc[0]
+                    except Exception as e:
+                        print(f"Error processing intersection for cs_id {cs_id}, side {side}: {e}")
 
-            # Find closest intersection point
-            closest_intersection = min(intersection_points, key=lambda x: mid_geom.distance(x))
-            mid_intersection_distance = mid_geom.distance(closest_intersection)
+                if not intersection_points:
+                    to_drop.add(unique_id)
+                    continue
 
-            # Update result if this is the first finding or if it's closer than previous finding
-            if unique_id not in embankment_results or mid_intersection_distance < embankment_results[unique_id][1]:
+                # Find closest intersection point
+                closest_intersection = min(intersection_points, key=lambda x: midpoint_geom.distance(x))
+                mid_intersection_distance = midpoint_geom.distance(closest_intersection)
                 embankment_results[unique_id] = (closest_intersection, mid_intersection_distance, gid)
-                # Remove from to_drop if it was there
-                to_drop.discard(index)
+
 
     print("Making the embankment file...")
     embankments = []
@@ -358,8 +358,9 @@ def find_embankment(cs_shp, cs_shp_cleaned_embank, mid_shp, dissolved_waterdelen
             'mid_dist': distance,
             'gid': gid
         })
-    #todo: it doesnt do the drop correctly, only when there is a single section in a cell?
-    gdf_cs.drop(list(to_drop), inplace=True)
+    # Removing cs that have no embankment point
+    mask = [(row['cs_id'], row['side']) not in to_drop for _, row in gdf_cs.iterrows()]
+    gdf_cs = gdf_cs[mask]
 
     print("Saving files...")
     gdf_cs.to_file(cs_shp_cleaned_embank)
@@ -369,7 +370,7 @@ def find_embankment(cs_shp, cs_shp_cleaned_embank, mid_shp, dissolved_waterdelen
     gdf_embank.to_file(embank_shp, driver="ESRI Shapefile")
 
 
-# Final sections NOT DONE
+# Finale sections
 def section_extraction_final(input_cs_shp, embank_shp, output_file_cs, mid_shp):
     print("Reading files...")
     cs_gdf = gpd.read_file(input_cs_shp)
@@ -378,7 +379,7 @@ def section_extraction_final(input_cs_shp, embank_shp, output_file_cs, mid_shp):
 
     cross_sections = []
 
-    for idx, row in tqdm(cs_gdf.iterrows(), total=cs_gdf.shape[0], desc="Creating new sections sections"):
+    for idx, row in tqdm(cs_gdf.iterrows(), total=cs_gdf.shape[0], desc="Creating new sections"):
         cs_id = row['cs_id']
         side = row['side']
         rv_id = row['rv_id']
@@ -450,74 +451,8 @@ def final_section(mid_pt, embank_pt, width=100):
 
     return section
 
-def clean_cross_sections(cs_shp, non_urban_area_shp, output_file):
-    gdf_cs = gpd.read_file(cs_shp)
-    gdf_non_urban_areas = gpd.read_file(non_urban_area_shp)
-
-    for index, row in tqdm(gdf_cs.iterrows(), total=gdf_cs.shape[0],
-                       desc="Processing each section, checking if it lays in a non-urban area"):
-        line_geom = row['geometry']
-        intersections = gdf_non_urban_areas[gdf_non_urban_areas.intersects(line_geom)]
-        if not intersections.empty:
-            gdf_cs = gdf_cs.drop(index)
-
-    gdf_cs.set_crs(epsg=28992, inplace=True)
-    gdf_cs.to_file(output_file, driver= "ESRI Shapefile")
-
 
 def remove_embankments_in_water(waterdelen_shp, input_embank_shp, output_embank_shp, input_cs_shp, output_cs_shp,  tolerance=0.01):
-    # print("Reading files...")
-    # embank_gdf = gpd.read_file(input_embank_shp)
-    # water_gdf = gpd.read_file(waterdelen_shp)
-    # cs_gdf = gpd.read_file(input_cs_shp)
-    #
-    # print("Building spatial index for water...")
-    # # embank_index = embank_gdf.sindex
-    # water_index = water_gdf.sindex
-    #
-    # points_to_keep = []
-    # removed_points = []
-    #
-    # for idx, point in tqdm(embank_gdf.iterrows(), total=len(embank_gdf),
-    #                        desc="Processing each point"):
-    #
-    #     bounds = point.geometry.buffer(tolerance).bounds
-    #     possible_matches_idx = list(water_index.intersection(bounds))
-    #
-    #     if not possible_matches_idx:
-    #         # If no potential matches, keep the point
-    #         points_to_keep.append(True)
-    #         continue
-    #
-    #     # Get the actual polygons that might intersect
-    #     possible_matches = water_gdf.iloc[possible_matches_idx]
-    #
-    #     # Check if point is within any of the potential polygons
-    #     keep_point = True
-    #     for _, poly in possible_matches.iterrows():
-    #         # Create boundary with tolerance
-    #         boundary_with_tolerance = poly.geometry.boundary.buffer(tolerance)
-    #
-    #         # Keep point if:
-    #         # 1. It's not completely within the polygon, OR
-    #         # 2. It's within the tolerance distance of the boundary
-    #         if (point.geometry.within(poly.geometry) and
-    #                 not point.geometry.intersects(boundary_with_tolerance)):
-    #             keep_point = False
-    #             removed_points.append((point['cs_id'], point['side']))
-    #             break
-    #
-    #     points_to_keep.append(keep_point)
-    #
-    #     # Filter the original GeoDataFrame
-    # filtered_embank = embank_gdf[points_to_keep]
-    #
-    # print(f"Original points: {len(embank_gdf)}")
-    # print(f"Filtered points: {len(filtered_embank)}")
-    #
-    # print("Filtering cross-sections...")
-    # cs_to_keep = ~cs_gdf.apply(lambda row: (row['cs_id'], row['side']) in removed_points, axis=1)
-    # filtered_cs = cs_gdf[cs_to_keep]
     # set tolerance as 0.01 = 1cm. Could probably be even smaller but this works.
     print("Reading files...")
     embank_gdf = gpd.read_file(input_embank_shp)
@@ -564,7 +499,265 @@ def remove_embankments_in_water(waterdelen_shp, input_embank_shp, output_embank_
 
     return
 
+def clean_cross_sections_non_urban(cs_shp, non_urban_area_shp, cs_output_file, embank_input, embank_output):
+    print("Reading files...")
+    gdf_cs = gpd.read_file(cs_shp)
+    gdf_non_urban_areas = gpd.read_file(non_urban_area_shp)
+    gdf_embank = gpd.read_file(embank_input)
 
+    print("Creating spatial index for non-urban areas...")
+    non_urban_sindex = gdf_non_urban_areas.sindex
+
+    for index, row in tqdm(gdf_cs.iterrows(), total=gdf_cs.shape[0],
+                       desc="Processing each section, checking if it lays in a non-urban area"):
+        line_geom = row['geometry']
+        cs_id = row['cs_id']
+        side= row['side']
+
+        possible_matches_index = list(non_urban_sindex.intersection(line_geom.bounds))
+        possible_matches = gdf_non_urban_areas.iloc[possible_matches_index]
+
+        intersections = possible_matches[possible_matches.intersects(line_geom)]
+
+        if not intersections.empty:
+            gdf_cs = gdf_cs.drop(index)
+            embank_row = gdf_embank[(gdf_embank['cs_id'] == cs_id) & (gdf_embank['side'] == side)]
+            gdf_embank = gdf_embank.drop(embank_row.index)
+
+    gdf_cs.set_crs(epsg=28992, inplace=True)
+    gdf_embank.set_crs(epsg=28992, inplace=True)
+    gdf_cs.to_file(cs_output_file, driver= "ESRI Shapefile")
+    gdf_embank.to_file(embank_output, driver="ESRI Shapefile")
+
+
+def create_river_width_file(embank_shp, mid_shp,  river_width_output):
+    print("Reading files...")
+    embank_gdf = gpd.read_file(embank_shp)
+    mid_gdf = gpd.read_file(mid_shp)
+
+    grouped = embank_gdf.groupby('cs_id')
+    river_width_list = []
+
+    for idx, group in tqdm(grouped, total=len(grouped),
+                       desc="Processing each section, making river width"):
+        if len(group) == 2:
+            row_0 = group.iloc[0]
+            geom_0, cs_id, rv_id, side_0, mid_dist_0 = row_0['geometry'], row_0['cs_id'], row_0['rv_id'], row_0['side'], row_0['mid_dist']
+            row_1 = group.iloc[1]
+            geom_1, side_1, mid_dist_1 = row_1['geometry'], row_1['side'], row_1['mid_dist']
+
+            mid_row = mid_gdf[mid_gdf['cs_id'] == cs_id]
+            mid_geom = mid_row['geometry'].iloc[0]
+
+            river_width = mid_dist_0 + mid_dist_1
+            river_geom_0 = LineString([mid_geom, geom_0.coords[0]])
+            river_geom_1 = LineString([mid_geom, geom_1.coords[0]])
+
+            river_width_list.append({'geometry': river_geom_0,'cs_id':cs_id, 'rv_id':rv_id, 'side':side_0, 'mid_dist': mid_dist_0})
+            river_width_list.append({'geometry': river_geom_1,'cs_id':cs_id, 'rv_id':rv_id, 'side':side_1, 'mid_dist': mid_dist_1})
+        elif len(group == 1):
+            row = group.iloc[0]
+            geom, cs_id, rv_id, side, mid_dist = row['geometry'], row['cs_id'], row['rv_id'], row['side'], row['mid_dist']
+
+            mid_row = mid_gdf[mid_gdf['cs_id'] == cs_id]
+            mid_geom = mid_row['geometry'].iloc[0]
+
+            river_geom = LineString([mid_geom, geom.coords[0]])
+
+            river_width_list.append({'geometry': river_geom, 'cs_id': cs_id,'rv_id':rv_id, 'side': side, 'mid_dist': mid_dist})
+        else:
+            print(f"Skipping cs_id {idx}: Expected 1 or 2 rows, found {len(group)}")
+            continue
+
+    river_width_gdf = gpd.GeoDataFrame(river_width_list)
+    river_width_gdf.set_crs(epsg=28992, inplace=True)
+    river_width_gdf.to_file(river_width_output)
+
+
+def clean_cross_sections_crossing_rivers(rivers_shp, rv_width, rv_width_out, cs_shp_input, cs_shp_output, embank_in, embank_out):
+    print("Reading files...")
+    rivers_gdf = gpd.read_file(rivers_shp)
+    rvwidth_gdf = gpd.read_file(rv_width)
+    cs_gdf = gpd.read_file(cs_shp_input)
+    embank_gdf = gpd.read_file(embank_in)
+
+    print("Creating spatial index for sections and riverwidths...")
+    cs_sindex = cs_gdf.sindex
+    rvwidth_sindex = rvwidth_gdf.sindex
+    indices_to_drop = set()
+    indices_to_drop_rv_width = set()
+
+    for index, row in tqdm(rivers_gdf.iterrows(), total=rivers_gdf.shape[0],
+                           desc="Processing each river, checking if a cs or rvwidth intersects with it"):
+        line_geom = row['geometry']
+        rv_id = row['fid']
+
+        possible_matches_index = list(cs_sindex.intersection(line_geom.bounds))
+        possible_matches = cs_gdf.iloc[possible_matches_index]
+
+        intersections = possible_matches[possible_matches.intersects(line_geom)]
+        indices_to_drop.update(intersections.index)
+
+        possible_matches_rvwidth_index = list(rvwidth_sindex.intersection(line_geom.bounds))
+        possible_matches_rvwidth = rvwidth_gdf.iloc[possible_matches_rvwidth_index]
+
+        intersections_rvwidth = possible_matches_rvwidth[possible_matches_rvwidth.intersects(line_geom)]
+        filtered_intersections_rvwidth = intersections_rvwidth[intersections_rvwidth['rv_id'] != rv_id]
+        indices_to_drop_rv_width.update(filtered_intersections_rvwidth.index)
+
+    # Collecting identifiers of dropped river widths
+    dropped_rvwidth_rows = rvwidth_gdf.loc[list(indices_to_drop_rv_width), ['cs_id', 'side']]
+    dropped_cs_conditions = set(zip(dropped_rvwidth_rows['cs_id'], dropped_rvwidth_rows['side']))
+    # removing those from cs_gdf
+    cs_gdf = cs_gdf[~cs_gdf.apply(lambda row: (row['cs_id'], row['side']) in dropped_cs_conditions, axis=1)]
+    # removing the cs that intersect with a river
+    #As we already removed a bunch, we need to find the ones that are still in the gdf first before dropping
+    valid_indices = list(indices_to_drop.intersection(cs_gdf.index))
+    cs_gdf = cs_gdf.drop(valid_indices)
+
+    # Removing items from rv_width
+    rvwidth_gdf = rvwidth_gdf.drop(indices_to_drop_rv_width)
+    #Removing items from embankment
+    embank_gdf = embank_gdf[
+        ~embank_gdf.apply(lambda row: (row['cs_id'], row['side']) in dropped_cs_conditions, axis=1)]
+
+    print("Saving files...")
+    cs_gdf.to_file(cs_shp_output, driver="ESRI Shapefile")
+    rvwidth_gdf.to_file(rv_width_out, driver="ESRI Shapefile")
+    embank_gdf.to_file(embank_out, driver="ESRI Shapefile")
+
+def clean_cross_sections_riverwidth_crossing_riverwidth(riverwidth_input, rvwidth_output, cs_shp_input, cs_shp_output, embank_input, embank_output):
+    #todo: for some reason it doesnt delete all the riverwidths and segments
+
+    print("Reading files...")
+    rvwidth_gdf = gpd.read_file(riverwidth_input)
+    cs_gdf = gpd.read_file(cs_shp_input)
+    embank_gdf = gpd.read_file(embank_input)
+
+    rvwidth_sindex = rvwidth_gdf.sindex
+
+    indices_to_drop = set()
+
+    for index, riverwidth in tqdm(rvwidth_gdf.iterrows(), total=rvwidth_gdf.shape[0], desc="Processing each riverwidth"):
+        if index in indices_to_drop:
+            continue
+
+        line_geom = riverwidth['geometry']
+        cs_id = riverwidth['cs_id']
+        # side = riverwidth['side']
+
+        possible_matches_index = list(rvwidth_sindex.intersection(line_geom.bounds))
+        possible_matches = rvwidth_gdf.iloc[possible_matches_index]
+        # dont check for current cross section
+        mask = (possible_matches.index != index) & (possible_matches['cs_id'] != cs_id)
+        possible_matches = possible_matches[mask]
+
+        intersections = possible_matches[possible_matches.intersects(line_geom)]
+
+        if not intersections.empty:
+            indices_to_drop.update(intersections.index)
+
+    # Removing items from rv_width
+    rvwidth_gdf_cleaned = rvwidth_gdf.drop(indices_to_drop)
+
+    # Get the dropped rows information
+    dropped_rvwidth = rvwidth_gdf.loc[list(indices_to_drop)]
+    dropped_cs_conditions = set(zip(dropped_rvwidth['cs_id'], dropped_rvwidth['side']))
+
+    # Filter cs_gdf and embank_gdf
+    cs_gdf_cleaned = cs_gdf[~cs_gdf.apply(lambda row: (row['cs_id'], row['side']) in dropped_cs_conditions, axis=1)]
+    embank_gdf_cleaned = embank_gdf[
+        ~embank_gdf.apply(lambda row: (row['cs_id'], row['side']) in dropped_cs_conditions, axis=1)]
+
+
+    print("Saving files...")
+    cs_gdf_cleaned.to_file(cs_shp_output, driver="ESRI Shapefile")
+    rvwidth_gdf_cleaned.to_file(rvwidth_output, driver="ESRI Shapefile")
+    embank_gdf_cleaned.to_file(embank_output, driver="ESRI Shapefile")
+
+
+def clean_midpoints_not_in_water(mid_shp, mid_out, cs_shp, cs_out, embank_shp, embank_out, rvwidth_shp, rvwidth_out, water_shp):
+    #NOTDONE do it via 'gid'
+    print("Reading files...")
+    mid_gdf = gpd.read_file(mid_shp)
+    water_gdf = gpd.read_file(water_shp)
+    rvwidth_gdf = gpd.read_file(rvwidth_shp)
+    cs_gdf = gpd.read_file(cs_shp)
+    embank_gdf = gpd.read_file(embank_shp)
+
+    mid_sindex = mid_gdf.sindex
+
+    for index, row in tqdm(water_gdf.iterrows(), total=water_gdf.shape[0],
+                           desc="Processing each water.."):
+        water_geom = row['geometry']
+
+
+#To find the embankment line for checking if the segment crosses another embankment line
+def order_points_along_river(points, river_line):
+    """
+    Order points based on their projection along the river line.
+    """
+    # Project points onto river line and get their distance along the river
+    projected_points = [(point, river_line.project(point)) for point in points]
+
+    # Sort points by their distance along the river
+    projected_points.sort(key=lambda x: x[1])
+
+    # Return ordered points
+    return [p[0] for p in projected_points]
+
+
+def create_boundary_line(boundary_points, riverline):
+    # Order points along the river
+    ordered_points = order_points_along_river(boundary_points, riverline)
+
+    # Extract only x and y from POINT or POINT Z objects
+    points_2d = [(point.x, point.y) for point in ordered_points]
+
+    # Create LineString if we have enough points
+    if len(points_2d) >= 2:
+        return LineString(points_2d)
+    else:
+        print("Warning: Not enough points for boundary")
+        return None
+
+
+def embankment_line(embank_shp, embank_line_shp, rivers_shp):
+    print("Reading files...")
+    embank_gdf = gpd.read_file(embank_shp)
+    rivers_gdf = gpd.read_file(rivers_shp)
+
+    embankment_lines = []
+
+    for index, river in tqdm(rivers_gdf.iterrows(), total=len(rivers_gdf), desc="Processing each river"):
+        rv_id = river['fid']
+        riverline = river['geometry']
+
+        # Filter embankments for this river
+        river_embank = embank_gdf[embank_gdf['rv_id'] == rv_id]
+
+        # Process each side separately
+        for side in river_embank['side'].unique():
+            # Get points for this side
+            side_points = river_embank[river_embank['side'] == side]
+            boundary_points = list(side_points['geometry'])
+
+            if boundary_points:
+                boundary_line = create_boundary_line(boundary_points, riverline)
+
+                if boundary_line is not None:
+                    embankment_lines.append({
+                        'geometry': boundary_line,
+                        'rv_id': rv_id,
+                        'side': side
+                    })
+
+    lines_gdf = gpd.GeoDataFrame(embankment_lines)
+    lines_gdf.set_crs("EPSG:28992")
+    lines_gdf.to_file(embank_line_shp, driver="ESRI Shapefile")
+
+
+#points
 def create_cross_section_points(cross_sections_shapefile, cs_width, output_shapefile):
     """
     Creates points along cross-sections and calculates horizontal distances.
@@ -643,7 +836,9 @@ if __name__ == '__main__':
     # This file is all the rivers that fall into urban areas
     rivers_urban_shp = "input/RIVERS/OSM_rivers_clipped.shp"
     # this file contains all the rivers that fall into urban areas and contains no duplicates
-    rivers_shp = "input/RIVERS/OSM_rivers_clipped_filtered.shp"
+    rivers_nodupl_shp = "input/RIVERS/OSM_rivers_clipped_filtered.shp"
+    # this file contains all those rivers that fall into urban areas, contains no duplicates, and are not in waterplains
+    rivers_shp = "input/RIVERS/OSM_rivers_clipped_filtered_nowatervlaktes.shp"
 
 
     """
@@ -652,40 +847,49 @@ if __name__ == '__main__':
     # These are the needed INPUT files
     # CLEANUP: remove bridges and remove non-urban areas
     # These are the bgt bridge ('overbruggingsdeel') polygons in the urban areas
-    bridges_shp = "input/DATA/BGT/bgt_overbrugginsdeel_clipped.shp"
+    bridges_shp = "input/DATA/BGT/bgt_overbrugginsdeel_clipped_extractedbylocation.shp"
     bridges_midpoints_shp = "input/DATA/BGT/bridges_mid.shp"
     # This is the shapefile defining non-urban areas in the Netherlands (opposite of the urban areas file)
-    non_urban_areas = "input/urban_areas/non_urban_areas.shp"
-    # This shapefile contains the waterplain polygons per grid cell
-    dissolved_waterdelen_noholes_split = "input/DATA/BGT/waterdeel_FINAL_buffered.shp"
+    non_urban_areas = "input/urban_areas/non_urban_areas_total_gridded.shp"
+    # This shapefile contains the waterplain polygons per grid cell (its not dissoolved?)
+    # dissolved_waterdelen_noholes_split = "input/DATA/BGT/waterdeel_FINAL_buffered.shp"
+    # This file contains the waterdelen after preparing the data
+    waterdelen_shp = "input/DATA/BGT/single_parts_extractedbylocation.shp"
 
     #These are the output files for the cross sections
     # LINES
     cross_section_lines_directory = "output/CS/lines"
     os.makedirs(cross_section_lines_directory, exist_ok=True)
-    # cross_sections_lines_shp = "output/CS/lines/cs_lines_pre_0.shp"
     cs_0 = "output/CS/lines/cs_lines_pre_0.shp"
-    # cross_sections_lines_nobridge_shp = "output/CS/lines/cs_lines_pre_1.shp"
     cs_1 = "output/CS/lines/cs_lines_pre_1.shp"
-    # cross_sections_lines_nobridge_grid_shp = "output/CS/lines/cs_lines_pre_2.shp"
     cs_2 = "output/CS/lines/cs_lines_pre_2.shp"
-    # cross_sections_lines_nobridge_grid_embank_shp = "output/CS/lines/cs_lines_pre_3.shp"
     cs_3 = "output/CS/lines/cs_lines_pre_3.shp"
-    # cross_sections_final_with_non_urban = "output/CS/lines/cs_lines_pre_4.shp"
     cs_4 = "output/CS/lines/cs_lines_pre_4.shp"
-    # cross_sections_drop_waterdelen = "output/CS/lines/cs_lines_pre_5.shp"
     cs_5 = "output/CS/lines/cs_lines_pre_5.shp"
-    # cross_sections_final_drop_non_urban = "output/CS/lines/cs_lines_final.shp"
-    cs_6 = "output/CS/lines/cs_lines_final_6.shp"
+    cs_6 = "output/CS/lines/cs_lines_pre_6.shp"
+    cs_7 = "output/CS/lines/cs_lines_pre_7.shp"
+
     # MIDPOINTS
     cross_section_mid_directory = "output/CS/mid"
     os.makedirs(cross_section_mid_directory, exist_ok=True)
-    cross_section_mid_shp = "output/CS/mid/cs_mid.shp"
+    mid_shp = "output/CS/mid/cs_mid.shp"
     # EMBANKMENTS
     embank_folder = "output/CS/embank"
     os.makedirs(embank_folder, exist_ok=True)
-    embank_shp = "output/CS/embank/embank.shp"
-    embank_cleaned_shp = "output/CS/embank/embank_cleaned0.shp"
+    embank_0 = "output/CS/embank/embank_0.shp"
+    embank_1 = "output/CS/embank/embank_1.shp"
+    embank_2 = "output/CS/embank/embank_2.shp"
+    embank_3 = "output/CS/embank/embank_3.shp"
+    embank_4 = "output/CS/embank/embank_4.shp"
+
+    embank_line = "output/CS/embank/embank_line.shp"
+
+    #river width output
+    rv_width_0 = "output/CS/embank/river_width_0.shp"
+    rv_width_1 = "output/CS/embank/river_width_1.shp"
+    rv_width_2 = "output/CS/embank/river_width_2.shp"
+
+
     # POINTS
     points_shp = "output/PTS/pts_shp"
 
@@ -702,28 +906,43 @@ if __name__ == '__main__':
     """
 
     # Create initial cross sections
-    # cross_section_extraction(rivers_shp, 50, 450, cross_sections_lines_shp, cross_section_mid_shp )
-
+    # cross_section_extraction(rivers_shp, 50, 600, cs_0, mid_shp )
 
     # Remove the sections that lay on bridges
-    # clean_bridges(cross_sections_lines_shp, cross_sections_lines_nobridge_shp, cross_section_mid_shp, bridges_shp)
+    # clean_bridges(cs_0, cs_1, mid_shp, bridges_shp)
 
     #This causes some extra rows, where one line can have two rows cause it lays in two grid cells
-    # add_grid_id_to_cs( cross_sections_lines_nobridge_shp, grid_shp, cross_sections_lines_nobridge_grid_shp)
+    # add_grid_id_to_cs_and_mid(cs_1, grid_shp, mid_shp)
 
     # Find the embankment points by intersecting with water plains
-    # find_embankment(cross_sections_lines_nobridge_grid_shp, cross_sections_lines_nobridge_grid_embank_shp, cross_section_mid_shp, dissolved_waterdelen_noholes_split,grid_shp, embank_shp)
+    #todo: i have to change such that it doesnt use gid but just a spatial index
+
+    # find_embankment(cs_1, cs_2, mid_shp, dissolved_waterdelen_noholes_split, embank_0)
 
     # Make new sections
-    # section_extraction_final(cross_sections_lines_nobridge_grid_embank_shp, embank_shp, cross_sections_final_with_non_urban, cross_section_mid_shp)
+    # section_extraction_final(cs_2, embank_0, cs_3, mid_shp)
 
-    # todo: change order of final section extraction and embankment removal as we dont need to compute sections at those embankments that lay in water
-    remove_embankments_in_water(dissolved_waterdelen_noholes_split, embank_shp, embank_cleaned_shp, cs_4, cs_5)
+    # Remove embankment points that lay in water (why would this happen if I use a spatial index now?)
+    # remove_embankments_in_water(dissolved_waterdelen_noholes_split, embank_0, embank_1, cs_3, cs_4)
 
     # Remove the sections that lay in non-urban areas
-    # clean_cross_sections(embank_shp, cross_sections_final_with_non_urban, non_urban_areas, cross_sections_final_drop_non_urban)
+    # clean_cross_sections_non_urban(cs_4, non_urban_areas, cs_5, embank_1, embank_2)
 
-    # todo: remove sections of which the embankment point lays in waterdeel, or if the embankment point lays on the edge of grid.
+    # create riverwidth file
+    # create_river_width_file(embank_2, mid_shp, rv_width_0)
+    # remove sections where riverwidth intersects with a river
+    # remove sections intersecting with river
+    # clean_cross_sections_crossing_rivers(rivers_shp, rv_width_0, rv_width_1, cs_5, cs_6, embank_2, embank_3)
+
+
+    #if a rivrewidth crosses another riverwidth, remove both
+    clean_cross_sections_riverwidth_crossing_riverwidth(rv_width_1, rv_width_2, cs_6,
+                                                            cs_7, embank_3, embank_4)
+
+
+    # embankment_line(embank_3, embank_line, rivers_shp)
+    # if a section crosses another embankment line, remove section
+
 
     # create_cross_section_points(cross_section_lines_shp, 100, points_shp)
 # todo: add riverwidth to midpoint shapefile. If only one embankment, then we need to find the opposit edge of the waterdeel somehow
