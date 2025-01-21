@@ -131,6 +131,7 @@ def append_to_line_in_file(filename, step, content_to_add):
     except Exception as e:
         print(f"Error: {e}")
 
+#section extraction
 def cross_section_extraction(river_file, interval, width, directory, step, txt_file):
     """
 
@@ -410,176 +411,6 @@ def extract_corners_lines(river_row, cs_id_value, angle_threshold, length):
     return corner_lines, corner_points, cs_id_value
 
 
-
-# def extract_corners_lines(river_row, cs_id_value,  angle_threshold, length):
-#     """
-#     Detects corners in a riverline and generates lines at half the corner angle.
-#     Generates two extra perpendicular lines next to the corner.
-#     """
-#
-#     corner_lines = []
-#     corner_points = []
-#
-#     def get_side_from_perpendicular(p1, p2, p3):
-#         """
-#         Determines the side of section with perpendicular cross-sections.
-#         Uses the same logic as get_perpendicular_cross_section for side assignment.
-#         """
-#         # Get vector of river direction
-#         river_vector = np.array([p3.x - p1.x, p3.y - p1.y])
-#         # Normalize
-#         river_vector = river_vector / np.linalg.norm(river_vector)
-#         # Get perpendicular vector (rotate 90 degrees)
-#         perp_vector = np.array([-river_vector[1], river_vector[0]])
-#
-#         # The point to the right of the river direction will be side 0
-#         # The point to the left will be side 1
-#         return perp_vector
-#
-#     def calculate_bisector_lines(p1, p2, p3, length):
-#         """
-#         Calculates a bisector line at p2 with the specified length.
-#         """
-#         a = np.array([p1.x, p1.y])
-#         b = np.array([p2.x, p2.y])
-#         c = np.array([p3.x, p3.y])
-#
-#         # Get perpendicular vector for side determination
-#         perp = get_side_from_perpendicular(p1, p2, p3)
-#
-#         # Vectors for the two segments
-#         ab = a - b
-#         cb = c - b
-#         # Normalize
-#         ab /= np.linalg.norm(ab)
-#         cb /= np.linalg.norm(cb)
-#         # Calculate the bisector vector
-#         bisector = (ab + cb) / np.linalg.norm(ab + cb)
-#         # Scale the bisector to the desired length
-#         bisector *= length
-#
-#         # Determine which bisector goes to which side using dot product
-#         dot_product = np.dot(perp, bisector)
-#
-#         if dot_product > 0:
-#             side0_line = LineString([p2, Point(b + bisector)])
-#             side1_line = LineString([p2, Point(b - bisector)])
-#         else:
-#             side0_line = LineString([p2, Point(b - bisector)])
-#             side1_line = LineString([p2, Point(b + bisector)])
-#
-#         return side0_line, side1_line
-#
-#     def is_clockwise(p1, p2, p3):
-#         """
-#         Determines if the corner formed by (p1, p2, p3) is a clockwise turn.
-#         """
-#         a = np.array([p1.x, p1.y])
-#         b = np.array([p2.x, p2.y])
-#         c = np.array([p3.x, p3.y])
-#
-#         # Vectors for the two segments
-#         ab = a - b
-#         cb = c - b
-#
-#         # Cross product z-component
-#         cross_z = ab[0] * cb[1] - ab[1] * cb[0]
-#         return cross_z < 0  # Clockwise turn
-#
-#     # for index, row in projected_gdf.iterrows():
-#     riverline = river_row['geometry']
-#     fid = river_row['fid']
-#
-#     # Ensure we handle MultiLineString and LineString cases
-#     if isinstance(riverline, MultiLineString):
-#         lines = riverline.geoms  # Access individual LineStrings
-#     else:
-#         lines = [riverline]
-#
-#     for line in lines:
-#         coords = list(line.coords)  # Access coordinates of the LineString
-#         for i in range(1, len(coords) - 1):
-#             p1 = Point(coords[i - 1])
-#             p2 = Point(coords[i])
-#             p3 = Point(coords[i + 1])
-#
-#             # Calculate the angle
-#             a = np.array([p1.x, p1.y])
-#             b = np.array([p2.x, p2.y])
-#             c = np.array([p3.x, p3.y])
-#
-#             ab = a - b
-#             cb = c - b
-#
-#             cosine_angle = np.dot(ab, cb) / (np.linalg.norm(ab) * np.linalg.norm(cb))
-#             angle = np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
-#
-#             if angle < angle_threshold:
-#                 # Generate bisector line
-#                 length_bisector = length / 2
-#
-#                 side0_line, side1_line= calculate_bisector_lines(p1, p2, p3, length_bisector)
-#
-#                 corner_lines.append({
-#                     'geometry': side0_line,
-#                     'rv_id': fid,
-#                     'cs_id': cs_id_value,
-#                     'side': 0,
-#                     'corner': 1
-#                 })
-#                 corner_lines.append({
-#                     'geometry': side1_line,
-#                     'rv_id': fid,
-#                     'cs_id': cs_id_value,
-#                     'side': 1,
-#                     'corner': 1
-#                 })
-#
-#                 # Collect the corner point
-#                 corner_points.append({
-#                     'geometry': p2,
-#                     'rv_id': fid,
-#                     'cs_id': cs_id_value,
-#                     'corner': 1
-#                 })
-#                 cs_id_value += 1
-#
-#                 # Create two extra perpendicular lines near the corner
-#                 distance_along_line = line.project(p2)
-#
-#                 for offset in [-2, 2]:
-#                     new_distance = distance_along_line + offset
-#                     if 0 <= new_distance <= line.length:
-#                         side_0, side_1, point_on_line = get_perpendicular_cross_section(
-#                             line, new_distance, length
-#                         )
-#
-#                         corner_points.append({
-#                             'geometry': point_on_line,
-#                             'rv_id': fid,
-#                             'cs_id': cs_id_value,
-#                             'corner': 1
-#                         })
-#
-#                         # CHANGE: Always add both sides
-#                         corner_lines.append({
-#                             'geometry': side_0,
-#                             'rv_id': fid,
-#                             'side': 0,
-#                             'cs_id': cs_id_value,
-#                             'corner': 1
-#                         })
-#                         corner_lines.append({
-#                             'geometry': side_1,
-#                             'rv_id': fid,
-#                             'side': 1,
-#                             'cs_id': cs_id_value,
-#                             'corner': 1
-#                         })
-#                         cs_id_value += 1
-#
-#             return corner_lines, corner_points, cs_id_value
-# Cleaning initial sections STEP 2------------------------------------------------------------------------------------
 def cleaning_initial_sections(cs_in, mid_in, waterdelen_shp, overbruggingsdeel_shp, directory, step, txt_file):
     cs_shp = cs_input(directory, cs_in)
     mid_shp = mid_input(directory, mid_in)
@@ -942,7 +773,7 @@ def clean_large_riverwidth_(rvwidth_gdf, embank_gdf):
     return filtered_rvwidth_gdf, filtered_embank_gdf, content
 
 
-# this is computign directions
+# this is computingdirections
 def calculate_line_direction(linestring):
     """Calculate the primary direction of a linestring in degrees from north (0-180)."""
     """Calculate the primary direction of a linestring in degrees (0-360)"""
@@ -1102,7 +933,6 @@ def clean_cross_sections_riverwidth_crossing_riverwidth_directions(rvwidth_gdf, 
     content = f"Total dropped: {len(indices_to_drop)}"
 
     return rvwidth_gdf_cleaned, embank_gdf_cleaned, content
-
 
 
 
@@ -1624,6 +1454,7 @@ def split_points_by_geojson_extents(json_file_path, points_file_path, output_dir
     points_gdf = gpd.read_file(points_file_path, engine="pyogrio")
 
     os.makedirs(output_dir, exist_ok=True)
+    tiles = []
 
     for _, extent_row in tqdm(extent_gdf.iterrows(), total=extent_gdf.shape[0], desc="Processing each extend..."):
         # tile_name = extent_row['properties']['name']
@@ -1636,65 +1467,23 @@ def split_points_by_geojson_extents(json_file_path, points_file_path, output_dir
 
         # Skip empty subsets
         if clipped_points.empty:
-            print(f"No points found within tile: {tile_name}. Skipping...")
+            # print(f"No points found within tile: {tile_name}. Skipping...")
             continue
 
+        tiles.append({'geometry': tile_geom, 'name': tile_name, 'done': 0})
+
         # Save to a new shapefile
-        output_path = os.path.join(output_dir, f"points_{tile_name}.shp")
+        output_path = os.path.join(output_dir, f"{tile_name}.shp")
         clipped_points.to_file(output_path)
-        print(f"Saved {len(clipped_points)} points to {output_path}")
 
-#Preparing for visibility analysis STEP 9 ----------------------------------------------------------------------
-def add_width_to_mid(riverwidth_in, mid_in, directory, step):
-    riverwidth_shp = riverwidth_input(directory, riverwidth_in)
-    mid_shp = mid_input(directory, mid_in)
+    tiles_gdf = gpd.GeoDataFrame(tiles)
+    tiles_gdf.to_file("output/CS/mid/tiles_processing_visibility.shp", driver= "ESRI Shapefile")
 
-    print("Reading files..")
-    riverwidth_gdf = gpd.read_file(riverwidth_shp)
-    mid_gdf = gpd.read_file(mid_shp)
-    mid_gdf['vwidth'] = None
-    id_to_drop = set()
-
-    # print("\nInitial DataFrame Information:")
-    # print(f"Columns in riverwidth_gdf: {list(riverwidth_gdf.columns)}")
-    # print(f"Columns in mid_gdf: {list(mid_gdf.columns)}")
-    # print(f"Initial number of midpoints: {len(mid_gdf)}")
-    # print(f"Initial number of riverwidth entries: {len(riverwidth_gdf)}")
-
-    for idx, point in tqdm(mid_gdf.iterrows(), total=mid_gdf.shape[0], desc="Procesing each midpoint"):
-        cs_id = point['cs_id']
-        rvwidth_rows = riverwidth_gdf[riverwidth_gdf['cs_id'] == cs_id]
+        # print(f"Saved {len(clipped_points)} points to {output_path}")
 
 
-        if not rvwidth_rows.empty:
-            total_length = None
-            if len(rvwidth_rows) == 2:
-                # total_length = rvwidth_rows['length'].sum()
-                total_length = 2 * rvwidth_rows['length'].max()
 
-            elif len(rvwidth_rows) == 1:
-                total_length = 2 * rvwidth_rows.iloc[0]['length']
-            else:
-                print(f"Unexpected number of rows for cs_id {cs_id}: {len(rvwidth_rows)}")
-
-            mid_gdf.loc[idx, 'vwidth'] = total_length
-        else:
-            id_to_drop.add(cs_id)
-
-    print("Cleaning and saving file...")
-    mid_cleaned =  mid_gdf[~mid_gdf['cs_id'].isin(id_to_drop)]
-
-    # print("\nPost-Processing Statistics:")
-    # print(f"Number of rows removed: {len(id_to_drop)}")
-    # print(f"Remaining number of midpoints: {len(mid_cleaned)}")
-    # print(f"Summary of 'vwidth' column in mid_cleaned:")
-    # print(mid_cleaned['vwidth'].describe())  # Summary statistics for the 'width' column
-    # print(f"Number of missing values in 'width': {mid_cleaned['vwidth'].isna().sum()}")
-
-    mid_out = mid_input(directory, step)
-    mid_cleaned.to_file(mid_out, driver="ESRI Shapefile")
-
-
+#add height of embankmen to midpoint file
 #filenames-------------------------------------------------------------------------------------------------------------
 def cs_input(directory, step):
     cs_dir = f"{directory}/CS/lines/cs_{step}"
@@ -1788,6 +1577,7 @@ if __name__ == '__main__':
     6. Cleaning segments: Remove the sections that lay in non-urban areas
     7. Cleaning segments: Remove segments intersecting with an embankment line     
     8. Create points and split into multiple files
+    9. Prepare midpoint file for visibility analysis
     
     """
 
@@ -1840,20 +1630,26 @@ if __name__ == '__main__':
 
 
     print("Step 8")
-    points_shp = "output/PTS/pts.gpkg"
+    # points_shp = "output/PTS/pts.gpkg"
     river_mapping = "output/PTS/mapping.gpkg"
     cs_in = cs_input(directory, 7)
 
     # create_cross_section_points(cs_in, 100, points_shp, river_mapping)
 
     json_file_path = "input/DATA/AHN/kaartbladindex_AHN_DSM.json"
-    # split_output_folder = "output/PTS/split"
-    # os.makedirs(split_output_folder, exist_ok=True)
+    points_shp = "output/PTS/pts_dtm.shp"
+    split_output_folder = "output/PTS/split_dtm"
+    os.makedirs(split_output_folder, exist_ok=True)
 
-    # split_points_by_geojson_extents(json_file_path, points_shp, split_output_folder)
+    split_points_by_geojson_extents(json_file_path, points_shp, split_output_folder)
 
 
     print("Step 9")
     step = 9
-    add_width_to_mid(7, 2, directory, step)
+    #First, add dtm data to embankment points --> from embank_7 to embank_dtm
+    # add_width_to_mid(7, 2, directory, step) # todo: add height value to midpoint
     # gives mid_shp
+
+    split_midpoints = "output/CS/mid/split"
+    mid_in = mid_input(directory, 9)
+    # split_points_by_geojson_extents(json_file_path,mid_in, split_midpoints )
