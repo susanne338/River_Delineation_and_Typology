@@ -5,6 +5,7 @@ from tqdm import tqdm
 import overpy
 from shapely.geometry import LineString, Polygon, MultiPolygon, Point
 import geopandas as gpd
+import pandas as pd
 import numpy as np
 import networkx as nx
 import math
@@ -1362,7 +1363,7 @@ def clean_riverwidth_and_segment_crossing_embankmentline(rivers_shp, rv_in, emba
 
 
 #points STEP 8---------------------------------------------------------------------------------------------------------
-def create_cross_section_points(cross_sections_shapefile, cs_width, output_shapefile, output_river_mapping):
+def create_cross_section_points(cross_sections_shapefile, cs_width, output_gpkg, output_csv):
     """
     Creates points along cross-sections and calculates horizontal distances.
 
@@ -1379,8 +1380,10 @@ def create_cross_section_points(cross_sections_shapefile, cs_width, output_shape
     print(f"Loaded {len(cross_sections)} cross-sections from {cross_sections_shapefile}")
 
     all_points = []
-    river_mapping = []
+    attributes = []
+
     n_points= 2 * cs_width
+    unique_id_counter = 0
 
     for ind, row in tqdm(cross_sections.iterrows(), total=cross_sections.shape[0], desc="Processing cross-sections..."):
         cs_id = row['cs_id']
@@ -1409,49 +1412,45 @@ def create_cross_section_points(cross_sections_shapefile, cs_width, output_shape
         # Create Point objects and calculate distances
         for i, (x, y) in enumerate(zip(lon, lat)):
             point_geom = Point(x, y)
-            # h_distance = Point(start_coords).distance(point_geom)
+            h_distance = Point(start_coords).distance(point_geom)
             all_points.append({
                 'geometry': point_geom,
-                'cs_id': cs_id,
-                # 'rv_id': rv_id,
-                'side':side,
-                'index': side,
-                # 'h_distance': h_distance
+                'id_uniq':unique_id_counter
             })
-        river_mapping.append({'cs_id': cs_id, 'side': side, 'rv_id':rv_id})
+
+            attributes.append({
+                'id_uniq': unique_id_counter,
+                'cs_id': cs_id,
+                'rv_id': rv_id,
+                'side': side,
+                'h_dist': h_distance
+            })
+
+            unique_id_counter += 1
 
     # Create GeoDataFrame
+    print("Creating geodataframes...")
     gdf = gpd.GeoDataFrame(all_points)
     gdf.set_crs(epsg=28992, inplace=True)
-    # mapping_gdf = gpd.GeoDataFrame(river_mapping)
-    # mapping_gdf.set_crs(epsg=28992, inplace=True)
+    attributes_df = pd.DataFrame(attributes)
 
     # Save to shapefile
-    print("Saving to file...")
-    gdf.to_file(output_shapefile, driver='GPKG')
-    # mapping_gdf.to_file(output_river_mapping, layer="river_mapping", driver="GPKG")
-    print(f"Cross-section points saved to: {output_shapefile}")
+    print("Saving to files...")
+    gdf.to_file(output_gpkg, driver='GPKG')
+    attributes_df.to_csv(output_csv, index=False)
+    print(f"Cross-section points saved to: {output_gpkg} and attributes to: {output_csv}")
 
     return gdf
 
 def split_points_by_geojson_extents(json_file_path, points_file_path, output_dir):
-    """
-    Splits a points shapefile into multiple shapefiles based on extents defined in a GeoJSON file.
-
-    Parameters:
-    - json_file_path: str, path to the GeoJSON-like file containing extents as features.
-    - points_file_path: str, path to the points shapefile.
-    - output_dir: str, directory where the output shapefiles will be saved.
-
-    Output:
-    - Separate shapefiles named as `points_<tile_name>.shp` for each extent.
-    """
 
     print("Reading extents")
     extent_gdf = gpd.read_file(json_file_path)
-    print("Reading points file")
+    # print("Reading points file")
+    log_step("Reading points file")
     # points_gdf = gpd.read_file(points_file_path)
-    points_gdf = gpd.read_file(points_file_path, engine="pyogrio")
+    points_gdf = gpd.read_file(points_file_path, engine="pyogrio") #pyogrio should be faster than fiona
+    log_step("Finished reading points file")
 
     os.makedirs(output_dir, exist_ok=True)
     tiles = []
@@ -1473,11 +1472,11 @@ def split_points_by_geojson_extents(json_file_path, points_file_path, output_dir
         tiles.append({'geometry': tile_geom, 'name': tile_name, 'done': 0})
 
         # Save to a new shapefile
-        output_path = os.path.join(output_dir, f"{tile_name}.shp")
+        output_path = os.path.join(output_dir, f"{tile_name}.gpkg")
         clipped_points.to_file(output_path)
 
     tiles_gdf = gpd.GeoDataFrame(tiles)
-    tiles_gdf.to_file("output/CS/mid/tiles_processing_visibility.shp", driver= "ESRI Shapefile")
+    # tiles_gdf.to_file("output/CS/mid/tiles_processing_visibility.shp", driver= "ESRI Shapefile")
 
         # print(f"Saved {len(clipped_points)} points to {output_path}")
 
@@ -1510,6 +1509,16 @@ def riverwidth_input(directory, step):
     riverwidth_input = f"{directory}/CS/riverwidth/riverwidth_{step}/riverwidth_{step}.shp"
     return riverwidth_input
 
+
+def log_step(step):
+    """
+    Logs the given step with the current timestamp.
+
+    Args:
+        step (str): A description of the step to log.
+    """
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{current_time}] Step: {step}")
 
 if __name__ == '__main__':
     """
@@ -1630,18 +1639,18 @@ if __name__ == '__main__':
 
 
     print("Step 8")
-    # points_shp = "output/PTS/pts.gpkg"
-    river_mapping = "output/PTS/mapping.gpkg"
+    points_geometry_gpkg = "output/PTS/pts.gpkg"
+    points_attributes_csv = "output/PTS/attributes.csv"
     cs_in = cs_input(directory, 7)
 
-    # create_cross_section_points(cs_in, 100, points_shp, river_mapping)
+    # create_cross_section_points(cs_in, 100, points_geometry_gpkg, points_attributes_csv)
 
     json_file_path = "input/DATA/AHN/kaartbladindex_AHN_DSM.json"
-    points_shp = "output/PTS/pts_dtm.shp"
-    split_output_folder = "output/PTS/split_dtm"
+    # points_shp = "output/PTS/pts_dtm.shp"
+    split_output_folder = "output/PTS/split"
     os.makedirs(split_output_folder, exist_ok=True)
 
-    split_points_by_geojson_extents(json_file_path, points_shp, split_output_folder)
+    split_points_by_geojson_extents(json_file_path, points_geometry_gpkg, split_output_folder)
 
 
     print("Step 9")
@@ -1650,6 +1659,6 @@ if __name__ == '__main__':
     # add_width_to_mid(7, 2, directory, step) # todo: add height value to midpoint
     # gives mid_shp
 
-    split_midpoints = "output/CS/mid/split"
-    mid_in = mid_input(directory, 9)
+    # split_midpoints = "output/CS/mid/split"
+    # mid_in = mid_input(directory, 9)
     # split_points_by_geojson_extents(json_file_path,mid_in, split_midpoints )
