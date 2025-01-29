@@ -7,17 +7,6 @@ import sys
 from qgis.core import QgsProject, QgsVectorLayer, QgsRectangle, QgsRasterLayer
 
 
-# def get_wcs_layer():
-#     # Get the WCS layer that's already loaded in QGIS
-#     # You'll need to use the exact name of your WCS layer as it appears in QGIS
-#     wcs_layer_name = "dsm"  # Change this to match your layer name
-#     wcs_layer = QgsProject.instance().mapLayersByName(wcs_layer_name)
-#
-#     if not wcs_layer:
-#         raise Exception(f"WCS layer '{wcs_layer_name}' not found in the QGIS project")
-#
-#     return wcs_layer[0]
-
 
 tile_file = "C:/Users/susan/Documents/thesis/Thesis-terminal/output/CS/mid/tiles_processing_visibility.shp"
 tiles_gdf = gpd.read_file(tile_file)
@@ -39,42 +28,15 @@ for idx, tile in tiles_gdf.iterrows():
 
     if not points_layer.isValid():
         print("Layer failed to load!")
+        continue
     else:
         print(f"Loaded {points_layer.featureCount()} features.")
         print(f"Points layer CRS: {points_layer.crs().authid()}")
 
 
     dsm_path = f"C:/Users/susan/Documents/thesis/Thesis-terminal/input/DATA/AHN/DSM/{tile_name}.tif"
-    # Get the WCS layer
-    # try:
-    #     wcs_layer = get_wcs_layer()
-    # except Exception as e:
-    #     print(f"Error getting WCS layer: {str(e)}")
-    #     continue
-
-    # Load and process river layer as before
-    # river_layer = QgsVectorLayer(
-    #     'C:/Users/susan/Documents/thesis/Thesis-terminal/input/RIVERS/OSM_rivers_clipped_filtered_nowatervlaktes_noNonWaterdeel_dissolved_split_uniqueID.shp',
-    #     'river', 'ogr')
-    #
-    # buffered_river_path = "C:/Users/susan/Documents/thesis/Thesis-terminal/input/DATA/BGT_rivers/extend_100mbuffer_around_waterdelen_for_bgt_download_NOHOLES.shp"
-    #
-    # # Instead of clipping a local DSM, we'll clip the WCS layer
-    # clipped_dem_path = f"C:/Users/susan/Documents/thesis/Thesis-terminal/input/DATA/AHN/temp_{tile_name}_clip.tif"
-    #
-    # # Clip WCS layer using the buffered river
-    # clip_params = {
-    #     'INPUT': wcs_layer,
-    #     'MASK': buffered_river_path,
-    #     'OUTPUT': clipped_dem_path,
-    #     'NODATA': None,
-    #     'ALPHA_BAND': False,
-    #     'CROP_TO_CUTLINE': True,
-    #     'KEEP_RESOLUTION': True
-    # }
-    # processing.run("gdal:cliprasterbymasklayer", clip_params)
-    # print(f"Clipped WCS layer saved to {clipped_dem_path}")
     dem_layer = QgsRasterLayer(dsm_path, "dsm")
+
     if not dem_layer.isValid():
         print(f"Failed to load DEM from {dsm_path}, probably cause it is not downloaded")
         continue
@@ -84,7 +46,7 @@ for idx, tile in tiles_gdf.iterrows():
     os.makedirs(output_dir, exist_ok=True)
 
     extent = points_layer.extent()
-    buffer_size = 200  # 200m buffer
+    buffer_size = 0  # 200m buffer
     extent_with_buffer = QgsRectangle(
         extent.xMinimum() - buffer_size,
         extent.yMinimum() - buffer_size,
@@ -143,6 +105,32 @@ for idx, tile in tiles_gdf.iterrows():
         print(f"Error clipping raster: {str(e)}")
         continue
 
+    # REPLACE NODATA WITH LOW ELEVATION
+    # After clipping the DEM but before running viewsheds:
+    dem_remove_nodata = os.path.join(temp_dir, f'dem_{tile_name}_remove_nodata.tif')
+    try:
+        result = processing.run("native:fillnodata", {
+            'INPUT': clipped_dem_path,
+            'BAND': 1,  # The band to process (1 for the first band)
+            'FILL_VALUE': -300,  # set to low elevation
+            'OUTPUT': dem_remove_nodata  # Output file path
+        })
+        if os.path.exists(dem_remove_nodata):
+            file_size = os.path.getsize(dem_remove_nodata)
+            print(f"Output file size: {file_size} bytes")
+            if file_size == 0:
+                print("Warning: Output file no nodata exists but is empty!")
+                continue
+            else:
+                print("Output file no nodata created successfully")
+        else:
+            print("Error: Output no nodata file was not created!")
+            continue
+
+    except Exception as e:
+        print(f"Error removing nodata raster: {str(e)}")
+        continue
+
 
 
     memory_mb = 10240
@@ -151,6 +139,14 @@ for idx, tile in tiles_gdf.iterrows():
 
     # Process viewsheds for each point
     for i, feature in enumerate(points_layer.getFeatures()):
+        point_id = feature.id()
+        output_path = f'{output_dir}viewshed_{point_id}.tif'
+
+        # Skip if viewshed already exists
+        if os.path.exists(output_path):
+            print(f"Viewshed for point {point_id} already exists, skipping...")
+            continue
+
         river_width = feature['vwidth']
         try:
             river_width = float(river_width) if river_width is not None else 200
@@ -158,6 +154,7 @@ for idx, tile in tiles_gdf.iterrows():
             river_width = 200
 
         max_distance = 100 + 0.5 * river_width
+        # max_distance = 500
         point_geom = feature.geometry().asPoint()
 
         height = feature['vheight'] + 1.75
@@ -165,16 +162,17 @@ for idx, tile in tiles_gdf.iterrows():
             height = 1.75
 
         point_id = feature.id()
-        print(f"river width is {river_width}, height: {height}, point_is {point_id}")
+        print(f"river width is {river_width}, height: {height}, point_is {point_id}, distance is {max_distance}")
+
+        print(f"Processing point {point_id} - river width: {river_width}, height: {height}")
 
         params = {
-            'input': clipped_dem_path,
-            # 'input': wcs_layer,
+            'input': dem_remove_nodata,
             'coordinates': f'{point_geom.x()},{point_geom.y()}',
             'max_distance': max_distance,
             'observer_elevation': height,
             'target_elevation': 0,
-            'output': f'{output_dir}viewshed_{point_id}.tif',
+            'output': output_path,
             '-b': True,
             'memory': memory_mb,
             'threads': num_cores,
@@ -183,16 +181,22 @@ for idx, tile in tiles_gdf.iterrows():
             'GRASS_REGION_READ_MAP_OPTS': '-s',
             'overwrite': True
         }
-
-        processing.run('grass7:r.viewshed', params)
-        if os.path.exists(params['output']):
-            print(f"Viewshed output saved to: {params['output']}")
-        else:
-            print(f"Viewshed output failed for point ID: {point_id}")
-            # sys.exit("Exiting the program because the viewshed was not made.")
+        try:
+            processing.run('grass7:r.viewshed', params)
+            if os.path.exists(params['output']):
+                print(f"Viewshed output saved to: {params['output']}")
+            else:
+                print(f"Viewshed output failed for point ID: {point_id}")
+                # sys.exit("Exiting the program because the viewshed was not made.")
+        except Exception as e:
+            print(f"Error processing viewshed for point {point_id}: {str(e)}")
+            continue
     # Clean up temporary clipped DEM
     if os.path.exists(clipped_dem_path):
         os.remove(clipped_dem_path)
+    # clean up this temporary file at the end
+    if os.path.exists(dem_remove_nodata):
+        os.remove(dem_remove_nodata)
 
     # Update tile status
     tiles_gdf.at[idx, 'done'] = 1
