@@ -1,3 +1,21 @@
+"""
+Performs r.viewshed per AHN DSM tile in qgis python console. Tile is clipped and nodata vlaues are filled with -300m.
+tile_file keeps track of progress. If a viewshed for a point already exists, it is skipped.
+
+Input: .tif AHN tile, midpoint points file, both with same tilename.
+Output: Viewshed per midpoint in folder VIS per tile
+
+Parameters are set as follows:
+- buffer around points extend is set as 200m
+- Nodata fill is set as 0m
+
+r.viewshed
+- Height is given as highest embankment height or default 1.75. (which means its nodata value + 1.75)
+- Width as largest riverwidth + 100 or default 200
+- Algorithm is executed in binary mode
+"""
+
+
 import numpy as np
 import processing
 import os
@@ -46,7 +64,7 @@ for idx, tile in tiles_gdf.iterrows():
     os.makedirs(output_dir, exist_ok=True)
 
     extent = points_layer.extent()
-    buffer_size = 0  # 200m buffer
+    buffer_size = 200  # 200m buffer
     extent_with_buffer = QgsRectangle(
         extent.xMinimum() - buffer_size,
         extent.yMinimum() - buffer_size,
@@ -112,7 +130,7 @@ for idx, tile in tiles_gdf.iterrows():
         result = processing.run("native:fillnodata", {
             'INPUT': clipped_dem_path,
             'BAND': 1,  # The band to process (1 for the first band)
-            'FILL_VALUE': -300,  # set to low elevation
+            'FILL_VALUE': 0,  # set to low elevation
             'OUTPUT': dem_remove_nodata  # Output file path
         })
         if os.path.exists(dem_remove_nodata):
@@ -157,9 +175,12 @@ for idx, tile in tiles_gdf.iterrows():
         # max_distance = 500
         point_geom = feature.geometry().asPoint()
 
-        height = feature['vheight'] + 1.75
-        if not height:
+        vheight = feature['vheight']
+
+        if vheight is None or vheight == NULL or vheight == QVariant():
             height = 1.75
+        else:
+            height = vheight + 1.75
 
         point_id = feature.id()
         print(f"river width is {river_width}, height: {height}, point_is {point_id}, distance is {max_distance}")
@@ -195,8 +216,8 @@ for idx, tile in tiles_gdf.iterrows():
     if os.path.exists(clipped_dem_path):
         os.remove(clipped_dem_path)
     # clean up this temporary file at the end
-    if os.path.exists(dem_remove_nodata):
-        os.remove(dem_remove_nodata)
+    # if os.path.exists(dem_remove_nodata):
+    #     os.remove(dem_remove_nodata)
 
     # Update tile status
     tiles_gdf.at[idx, 'done'] = 1
